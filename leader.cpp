@@ -277,7 +277,7 @@ bool read_buttons_blocking(Robot& robot, Robot& robot2){
             base_feedback = base_cyclic->RefreshFeedback();
             int32_t flags = base_feedback.interconnect().status_flags();
             if(button_status(flags)){
-                std::cerr << "Pressed on button"  << std::endl;
+                std::cout << "Pressed on button" << std::endl;
                 //ead(robot,robot2);
                 return true;
             }
@@ -294,10 +294,10 @@ bool read_buttons_blocking(Robot& robot, Robot& robot2){
 
 int main(int argc, char const *argv[])
 {
-    Robot leader = Robot("192.168.2.10","admin","admin");
-    Robot follower = Robot("192.168.3.10","admin","admin");
-    move_to_home_position(leader.getBaseClient());
-    move_to_home_position(follower.getBaseClient());
+    Robot leader = Robot("192.168.2.20","admin","admin");
+    Robot follower = Robot("192.168.2.11","admin","admin");
+    move_to_start_position(leader.getBaseClient());
+    move_to_start_position(follower.getBaseClient());
     read_buttons_blocking(leader,follower);
     lead(leader,follower);
 

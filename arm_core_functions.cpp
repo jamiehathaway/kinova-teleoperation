@@ -42,7 +42,7 @@ int64_t GetTickUs()
 /**************************
  * Example core functions *
  **************************/
-void move_to_home_position(k_api::Base::BaseClient* base)
+void move_to_start_position(k_api::Base::BaseClient* base)
 {
     // Make sure the arm is in Single Level Servoing before executing an Action
     auto servoingMode = k_api::Base::ServoingModeInformation();
@@ -51,7 +51,7 @@ void move_to_home_position(k_api::Base::BaseClient* base)
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Move arm to ready position
-    std::cout << "Moving the arm to a safe position" << std::endl;
+    std::cout << "Moving the arm to the start position" << std::endl;
     auto action_type = k_api::Base::RequestedActionType();
     action_type.set_action_type(k_api::Base::REACH_JOINT_ANGLES);
     auto action_list = base->ReadAllActions(action_type);
@@ -59,7 +59,7 @@ void move_to_home_position(k_api::Base::BaseClient* base)
     action_handle.set_identifier(0);
     for (auto action : action_list.action_list()) 
     {
-        if (action.name() == "Home") 
+        if (action.name() == "TeleopStart") 
         {
             action_handle = action.handle();
         }
