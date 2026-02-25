@@ -74,73 +74,73 @@ Use `tf2` for frame-consistent wrench transformation.
 ### 3.1 Wrench reflection from follower to leader
 Let follower wrench in follower tool frame be:
 
-\[
+$$
 \mathbf{w}_f = \begin{bmatrix} \mathbf{F}_f \\ \boldsymbol{\tau}_f \end{bmatrix}
-\]
+$$
 
-Transform to leader tool frame using rigid transform (rotation \(\mathbf{R}\), position offset \(\mathbf{p}\)):
+Transform to leader tool frame using rigid transform (rotation $\mathbf{R}$, position offset $\mathbf{p}$):
 
-\[
+$$
 \mathbf{F}_\ell = \mathbf{R}\,\mathbf{F}_f
-\]
-\[
+$$
+$$
 \boldsymbol{\tau}_\ell = \mathbf{R}\,\boldsymbol{\tau}_f + \mathbf{p} \times \mathbf{F}_\ell
-\]
+$$
 
 Apply reflection and gain:
 
-\[
+$$
 \mathbf{w}_{render} = -\mathbf{G}\,\mathbf{w}_\ell
-\]
+$$
 
-where \(\mathbf{G}=\mathrm{diag}(g_x,g_y,g_z,g_{rx},g_{ry},g_{rz})\).
+where $\mathbf{G}=\mathrm{diag}(g_x,g_y,g_z,g_{rx},g_{ry},g_{rz})$.
 
 ### 3.2 Filtering and deadband
 Use first-order low-pass filter per wrench component:
 
-\[
+$$
 \hat{w}_k = \alpha w_k + (1-\alpha)\hat{w}_{k-1},\quad \alpha = \frac{2\pi f_c\,\Delta t}{1+2\pi f_c\,\Delta t}
-\]
+$$
 
-Apply deadband \(d_i\): if \(|\hat{w}_i|<d_i\), set to 0.
+Apply deadband $d_i$: if $|\hat{w}_i|<d_i$, set to 0.
 
 ### 3.3 Wrench to leader joint torques
-Compute leader geometric Jacobian at current joint state \(\mathbf{J}(\mathbf{q})\in\mathbb{R}^{6\times n}\):
+Compute leader geometric Jacobian at current joint state $\mathbf{J}(\mathbf{q})\in\mathbb{R}^{6\times n}$:
 
-\[
+$$
 \boldsymbol{\tau}_{cmd} = \mathbf{J}(\mathbf{q})^T\,\mathbf{w}_{render}
-\]
+$$
 
 Add joint damping to stabilize free-space behavior:
 
-\[
+$$
 \boldsymbol{\tau}_{cmd} \leftarrow \boldsymbol{\tau}_{cmd} - \mathbf{B}\,\dot{\mathbf{q}}
-\]
+$$
 
-Saturate per-joint torque command: \(\tau_{min,j} \le \tau_j \le \tau_{max,j}\).
+Saturate per-joint torque command: $\tau_{min,j} \le \tau_j \le \tau_{max,j}$.
 
 ### 3.4 Torque to current for Gen3 Lite (no torque sensors)
 You can command motor current but motor constants are unknown.
 
 Primary model:
 
-\[
+$$
 \tau_j \approx K_{t,j}(i_j - i_{0,j}) - F_{c,j}\,\mathrm{sgn}(\dot{q}_j) - B_{v,j}\dot{q}_j
-\]
+$$
 
 Commanded current (using estimated parameters):
 
-\[
+$$
 i_{cmd,j} = i_{0,j} + \frac{\tau_{cmd,j} + F_{c,j}\,\mathrm{sgn}(\dot{q}_j) + B_{v,j}\dot{q}_j}{\hat{K}_{t,j}}
-\]
+$$
 
-If \(\hat{K}_{t,j}\) is unknown initially, start with conservative scalar gains:
+If $\hat{K}_{t,j}$ is unknown initially, start with conservative scalar gains:
 
-\[
+$$
 i_{cmd,j} = i_{bias,j} + \alpha_j\,\tau_{cmd,j}
-\]
+$$
 
-and tune \(\alpha_j\) with strict saturation and watchdog limits.
+and tune $\alpha_j$ with strict saturation and watchdog limits.
 
 ## 4) Practical solution for unknown motor constants
 
@@ -158,17 +158,17 @@ Because Gen3 Lite lacks direct torque sensing, use a staged identification strat
    - Known: gravity torque from model at each pose/payload.
 3. Fit per-joint affine map using least squares:
 
-\[
+$$
 i_j = a_j\,\tau_{model,j} + b_j
-\]
+$$
 
 Then:
 
-\[
+$$
 \hat{K}_{t,j} = 1/a_j,\quad i_{0,j}=b_j
-\]
+$$
 
-4. Add dynamic trajectories to estimate friction terms \(F_c, B_v\).
+4. Add dynamic trajectories to estimate friction terms $F_c, B_v$.
 
 ### 4.3 Stage C: Online adaptation (optional)
 - Slowly adapt `alpha_j` based on consistency between expected and observed behavior.
