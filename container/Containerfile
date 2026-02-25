@@ -1,0 +1,30 @@
+FROM docker.io/osrf/ros:jazzy-desktop
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Core dev tools for ROS 2 C++ and colcon builds
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    git \
+    gdb \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-vcstool \
+    python3-pip \
+    iputils-ping \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Initialize rosdep inside container (safe to ignore if already initialized)
+RUN rosdep init || true
+
+ENV ROS_DISTRO=jazzy
+ENV ROS_WS=/workspaces/kinova-teleoperation
+
+WORKDIR ${ROS_WS}
+
+# Keep shell ROS-ready by default
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
+
+CMD ["bash"]
