@@ -2,14 +2,18 @@
 <package format="3">
   <name>kinova_teleoperation</name>
   <version>0.1.0</version>
-  <description>Kinova teleoperation example package (cmake build type) prepared for colcon workspace usage.</description>
+  <description>Kinova teleoperation examples and data collection tools.</description>
 
-  <maintainer email="j.hathwaway@aston.ac.uk">Jamie Hathwaway</maintainer>
+  <maintainer email="jamie@example.com">Jamie</maintainer>
   <license>Proprietary</license>
 
-  <buildtool_depend>cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>moveit_ros_planning_interface</depend>
 
   <export>
-    <build_type>cmake</build_type>
+    <build_type>ament_cmake</build_type>
   </export>
 </package>
