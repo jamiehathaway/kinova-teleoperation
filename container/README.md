@@ -10,9 +10,26 @@ This project uses a local Podman image so ROS 2 Jazzy is not installed on the ho
 ```bash
 ./scripts/podman_ros2.sh build
 ./scripts/podman_ros2.sh run
-./scripts/podman_ros2.sh test
 ./scripts/podman_ros2.sh exec
 ```
+
+Then inside the container shell:
+```bash
+source /opt/ros/jazzy/setup.bash
+./scripts/setup_colcon_ws.sh
+cd .ros2_ws
+colcon build --symlink-install
+source install/setup.bash
+```
+
+## Recommended workspace layout
+This repo stays as a normal git repository root. A local colcon workspace is created in:
+- `.ros2_ws/`
+
+The bootstrap script creates this symlink:
+- `.ros2_ws/src/kinova_teleoperation -> <repo-root>`
+
+This gives you a reproducible workflow while keeping git history and container config at repository root.
 
 ## Commands
 - `build`: build image `kinova-ros2-jazzy:dev`

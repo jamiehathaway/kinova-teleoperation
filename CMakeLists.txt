@@ -39,3 +39,6 @@ target_compile_definitions(kinova_example PRIVATE _OS_UNIX DURATION=${DURATION})
 
 # Link against the Kortex API libraries (adjust as needed)
 target_link_libraries(kinova_example KortexApiCpp pthread)
+
+# Install executable for colcon/cmake package usage
+install(TARGETS kinova_example RUNTIME DESTINATION bin)

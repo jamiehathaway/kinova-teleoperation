@@ -42,3 +42,10 @@ build/
 
 # debug information files
 *.dwo
+
+# ROS 2 / colcon workspace artifacts
+.ros2_ws/build/
+.ros2_ws/install/
+.ros2_ws/log/
+
+.ros2_ws/
