@@ -4,7 +4,7 @@
   <version>0.1.0</version>
   <description>Kinova teleoperation examples and data collection tools.</description>
 
-  <maintainer email="jamie@example.com">Jamie</maintainer>
+  <maintainer email="j.hathaway@aston.ac.uk">Jamie</maintainer>
   <license>Proprietary</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -12,6 +12,9 @@
   <depend>rclcpp</depend>
   <depend>sensor_msgs</depend>
   <depend>moveit_ros_planning_interface</depend>
+  <depend>ament_index_cpp</depend>
+  <depend>kdl_parser</depend>
+  <depend>urdf</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

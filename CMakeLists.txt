@@ -8,6 +8,9 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(kdl_parser REQUIRED)
+find_package(urdf REQUIRED)
 
 # Set DURATION variable with default value of 20
 if(NOT DEFINED DURATION)
@@ -30,19 +33,29 @@ set(KORTEX_INCLUDE_DIRS
 
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/kortex_api/lib/release)
 
-add_executable(kinova_example
+add_executable(kinova_teleop
   api_setup.cpp
-  leader.cpp
-  arm_core_functions.cpp)
+  arm_core_functions.cpp
+  leader.cpp)
+target_include_directories(kinova_teleop PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(kinova_teleop PRIVATE _OS_UNIX DURATION=${DURATION})
+target_link_libraries(kinova_teleop KortexApiCpp pthread)
 
-target_include_directories(kinova_example PRIVATE ${KORTEX_INCLUDE_DIRS})
-target_compile_definitions(kinova_example PRIVATE _OS_UNIX DURATION=${DURATION})
-target_link_libraries(kinova_example KortexApiCpp pthread)
+add_executable(kinova_torque_control_test
+  api_setup.cpp
+  arm_core_functions.cpp
+  torque_control_test.cpp)
+target_include_directories(kinova_torque_control_test PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(kinova_torque_control_test PRIVATE _OS_UNIX DURATION=${DURATION})
+target_link_libraries(kinova_torque_control_test KortexApiCpp pthread)
+ament_target_dependencies(kinova_torque_control_test
+  ament_index_cpp
+  kdl_parser
+  urdf)
 
 add_executable(kinova_moveit_current_logger
   api_setup.cpp
   moveit_random_pose_current_logger.cpp)
-
 target_include_directories(kinova_moveit_current_logger PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_moveit_current_logger PRIVATE _OS_UNIX)
 target_link_libraries(kinova_moveit_current_logger
@@ -55,7 +68,8 @@ ament_target_dependencies(kinova_moveit_current_logger
   moveit_ros_planning_interface)
 
 install(TARGETS
-  kinova_example
+  kinova_teleop
+  kinova_torque_control_test
   kinova_moveit_current_logger
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
