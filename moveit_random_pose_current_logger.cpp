@@ -7,15 +7,18 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/joint_state.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 #include <moveit/move_group_interface/move_group_interface.hpp>
 #include <moveit/planning_interface/planning_interface.hpp>
+#include <moveit/planning_scene_interface/planning_scene_interface.hpp>
+#include <moveit_msgs/msg/collision_object.hpp>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <shape_msgs/msg/solid_primitive.hpp>
 
 #include "api_setup.hpp"
 
@@ -33,7 +36,7 @@ public:
     sample_period_ms_ = this->declare_parameter<int>("sample_period_ms", 20);
     settle_time_ms_ = this->declare_parameter<int>("settle_time_ms", 300);
     output_csv_ = this->declare_parameter<std::string>(
-      "output_csv", "/workspaces/kinova-teleoperation/.ros2_ws/log/moveit_current_log.csv");
+      "output_csv", "/workspaces/kinova-teleoperation/log/moveit_current_log.csv");
 
     joint_names_ = this->declare_parameter<std::vector<std::string>>(
       "joint_names", std::vector<std::string>{"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"});
@@ -42,6 +45,27 @@ public:
     robot_ip_ = this->declare_parameter<std::string>("robot_ip", "192.168.2.10");
     username_ = this->declare_parameter<std::string>("username", "admin");
     password_ = this->declare_parameter<std::string>("password", "admin");
+
+    // Static scene controls: table + 3 walls.
+    enable_environment_obstacles_ = this->declare_parameter<bool>("enable_environment_obstacles", true);
+    obstacle_frame_ = this->declare_parameter<std::string>("obstacle_frame", "base_link");
+    obstacle_apply_wait_ms_ = this->declare_parameter<int>("obstacle_apply_wait_ms", 1000);
+
+    // Table dimensions/pose (center pose and box dimensions).
+    table_size_ = this->declare_parameter<std::vector<double>>("table.size", {1.2, 1.2, 0.06});
+    table_pose_ = this->declare_parameter<std::vector<double>>("table.pose", {0.0, 0.0, -0.09});
+
+    // Back wall.
+    back_wall_size_ = this->declare_parameter<std::vector<double>>("back_wall.size", {0.06, 1.2, 1.0});
+    back_wall_pose_ = this->declare_parameter<std::vector<double>>("back_wall.pose", {-0.55, 0.0, 0.50});
+
+    // Left wall.
+    left_wall_size_ = this->declare_parameter<std::vector<double>>("left_wall.size", {1.2, 0.06, 1.0});
+    left_wall_pose_ = this->declare_parameter<std::vector<double>>("left_wall.pose", {0.0, 0.55, 0.50});
+
+    // Right wall.
+    right_wall_size_ = this->declare_parameter<std::vector<double>>("right_wall.size", {1.2, 0.06, 1.0});
+    right_wall_pose_ = this->declare_parameter<std::vector<double>>("right_wall.pose", {0.0, -0.55, 0.50});
 
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 10,
@@ -80,8 +104,17 @@ public:
     executor.add_node(self);
 
     moveit::planning_interface::MoveGroupInterface move_group(self, move_group_name_);
+    moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+
     move_group.setPlanningTime(5.0);
     move_group.setNumPlanningAttempts(5);
+
+    if (enable_environment_obstacles_) {
+      applyEnvironmentObstacles(planning_scene_interface);
+      executor.spin_some();
+      std::this_thread::sleep_for(std::chrono::milliseconds(obstacle_apply_wait_ms_));
+      RCLCPP_INFO(this->get_logger(), "Applied static obstacles to planning scene.");
+    }
 
     for (int target_idx = 0; target_idx < num_random_targets_ && rclcpp::ok(); ++target_idx) {
       executor.spin_some();
@@ -118,6 +151,54 @@ public:
   }
 
 private:
+  static bool isValidVec(const std::vector<double> & v, size_t expected)
+  {
+    return v.size() == expected;
+  }
+
+  moveit_msgs::msg::CollisionObject makeBox(
+    const std::string & id,
+    const std::vector<double> & size,
+    const std::vector<double> & pose_xyz) const
+  {
+    if (!isValidVec(size, 3) || !isValidVec(pose_xyz, 3)) {
+      throw std::runtime_error("Invalid obstacle parameter length for " + id);
+    }
+
+    moveit_msgs::msg::CollisionObject obj;
+    obj.id = id;
+    obj.header.frame_id = obstacle_frame_;
+    obj.operation = moveit_msgs::msg::CollisionObject::ADD;
+
+    shape_msgs::msg::SolidPrimitive primitive;
+    primitive.type = shape_msgs::msg::SolidPrimitive::BOX;
+    primitive.dimensions.resize(3);
+    primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_X] = size[0];
+    primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Y] = size[1];
+    primitive.dimensions[shape_msgs::msg::SolidPrimitive::BOX_Z] = size[2];
+
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = pose_xyz[0];
+    pose.position.y = pose_xyz[1];
+    pose.position.z = pose_xyz[2];
+    pose.orientation.w = 1.0;
+
+    obj.primitives.push_back(primitive);
+    obj.primitive_poses.push_back(pose);
+    return obj;
+  }
+
+  void applyEnvironmentObstacles(moveit::planning_interface::PlanningSceneInterface & psi)
+  {
+    std::vector<moveit_msgs::msg::CollisionObject> objects;
+    objects.push_back(makeBox("table", table_size_, table_pose_));
+    objects.push_back(makeBox("back_wall", back_wall_size_, back_wall_pose_));
+    objects.push_back(makeBox("left_wall", left_wall_size_, left_wall_pose_));
+    objects.push_back(makeBox("right_wall", right_wall_size_, right_wall_pose_));
+
+    psi.applyCollisionObjects(objects);
+  }
+
   void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
   {
     std::lock_guard<std::mutex> lock(joint_state_mutex_);
@@ -224,6 +305,18 @@ private:
   std::string robot_ip_;
   std::string username_;
   std::string password_;
+
+  bool enable_environment_obstacles_;
+  std::string obstacle_frame_;
+  int obstacle_apply_wait_ms_;
+  std::vector<double> table_size_;
+  std::vector<double> table_pose_;
+  std::vector<double> back_wall_size_;
+  std::vector<double> back_wall_pose_;
+  std::vector<double> left_wall_size_;
+  std::vector<double> left_wall_pose_;
+  std::vector<double> right_wall_size_;
+  std::vector<double> right_wall_pose_;
 
   std::unique_ptr<Robot> robot_;
   int actuator_count_;
