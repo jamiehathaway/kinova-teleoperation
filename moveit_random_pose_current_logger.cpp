@@ -52,20 +52,25 @@ public:
     obstacle_apply_wait_ms_ = this->declare_parameter<int>("obstacle_apply_wait_ms", 1000);
 
     // Table dimensions/pose (center pose and box dimensions).
-    table_size_ = this->declare_parameter<std::vector<double>>("table.size", {1.2, 1.2, 0.06});
-    table_pose_ = this->declare_parameter<std::vector<double>>("table.pose", {0.0, 0.0, -0.09});
+    table_size_ = this->declare_parameter<std::vector<double>>("table.size", {1.20, 0.80, 0.025});
+    table_pose_ = this->declare_parameter<std::vector<double>>("table.pose", {0.40, -0.34, -0.0126});
 
     // Back wall.
-    back_wall_size_ = this->declare_parameter<std::vector<double>>("back_wall.size", {0.06, 1.2, 1.0});
-    back_wall_pose_ = this->declare_parameter<std::vector<double>>("back_wall.pose", {-0.55, 0.0, 0.50});
+    back_wall_size_ = this->declare_parameter<std::vector<double>>("back_wall.size", {1.20, 0.05, 0.75});
+    back_wall_pose_ = this->declare_parameter<std::vector<double>>("back_wall.pose", {0.40, -0.715, 0.375});
 
     // Left wall.
-    left_wall_size_ = this->declare_parameter<std::vector<double>>("left_wall.size", {1.2, 0.06, 1.0});
-    left_wall_pose_ = this->declare_parameter<std::vector<double>>("left_wall.pose", {0.0, 0.55, 0.50});
+    left_wall_size_ = this->declare_parameter<std::vector<double>>("left_wall.size", {0.05, 0.45, 0.75});
+    left_wall_pose_ = this->declare_parameter<std::vector<double>>("left_wall.pose", {0.975, -0.505, 0.375});
 
     // Right wall.
-    right_wall_size_ = this->declare_parameter<std::vector<double>>("right_wall.size", {1.2, 0.06, 1.0});
-    right_wall_pose_ = this->declare_parameter<std::vector<double>>("right_wall.pose", {0.0, -0.55, 0.50});
+    right_wall_size_ = this->declare_parameter<std::vector<double>>("right_wall.size", {0.05, 0.45, 0.75});
+    right_wall_pose_ = this->declare_parameter<std::vector<double>>("right_wall.pose", {-0.175, -0.505, 0.375});
+
+    // Exclusion region.
+    exclusion_region_size_ = this->declare_parameter<std::vector<double>>("exlcusion_region.size", {0.60, 0.80, 0.75});
+    exclusion_region_pose_ = this->declare_parameter<std::vector<double>>("exclusion_region.pose", {0.70, -0.40, 0.375});
+
 
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 10,
@@ -195,6 +200,7 @@ private:
     objects.push_back(makeBox("back_wall", back_wall_size_, back_wall_pose_));
     objects.push_back(makeBox("left_wall", left_wall_size_, left_wall_pose_));
     objects.push_back(makeBox("right_wall", right_wall_size_, right_wall_pose_));
+    objects.push_back(makeBox("exclusion_region", exclusion_region_size_, exclusion_region_pose_));
 
     psi.applyCollisionObjects(objects);
   }
@@ -227,6 +233,27 @@ private:
     return currents;
   }
 
+  std::vector<double> readMotorTorques() const
+  {
+    std::vector<double> torques(static_cast<size_t>(actuator_count_), std::numeric_limits<double>::quiet_NaN());
+
+    if (!robot_) {
+      return torques;
+    }
+
+    try {
+      const auto feedback = robot_->getBaseCyclicClient()->RefreshFeedback();
+      const int n = std::min(actuator_count_, static_cast<int>(feedback.actuators_size()));
+      for (int i = 0; i < n; ++i) {
+        torques[static_cast<size_t>(i)] = static_cast<double>(feedback.actuators(i).torque());
+      }
+    } catch (...) {
+      // Keep NaN torques for this sample if cyclic read fails.
+    }
+
+    return torques;
+  }
+
   void writeCsvHeader()
   {
     csv_ << "timestamp_ns,target_idx,sample_idx";
@@ -238,6 +265,9 @@ private:
     }
     for (int i = 0; i < actuator_count_; ++i) {
       csv_ << ",motor_current_" << (i + 1);
+    }
+    for (int i = 0; i < actuator_count_; ++i) {
+      csv_ << ",motor_torque_" << (i + 1);
     }
     csv_ << "\n";
   }
@@ -269,6 +299,7 @@ private:
     }
 
     const auto currents = readMotorCurrents();
+    const auto torques = readMotorTorques();
     const auto now_ns = this->get_clock()->now().nanoseconds();
 
     csv_ << now_ns << "," << target_idx << "," << sample_idx;
@@ -287,6 +318,9 @@ private:
 
     for (double c : currents) {
       csv_ << "," << std::setprecision(12) << c;
+    }
+    for (double t : torques) {
+      csv_ << "," << std::setprecision(12) << t;
     }
 
     csv_ << "\n";
@@ -317,6 +351,8 @@ private:
   std::vector<double> left_wall_pose_;
   std::vector<double> right_wall_size_;
   std::vector<double> right_wall_pose_;
+  std::vector<double> exclusion_region_size_;
+  std::vector<double> exclusion_region_pose_;
 
   std::unique_ptr<Robot> robot_;
   int actuator_count_;
