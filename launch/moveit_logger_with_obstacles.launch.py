@@ -36,14 +36,16 @@ def generate_launch_description():
                 "obstacle_frame": "base_link",
                 "obstacle_apply_wait_ms": 1000,
                 # Table + 3 walls around the back and sides.
-                "table.size": [1.2, 1.2, 0.06],
-                "table.pose": [0.0, 0.0, -0.09],
-                "back_wall.size": [0.06, 1.2, 1.0],
-                "back_wall.pose": [-0.55, 0.0, 0.50],
-                "left_wall.size": [1.2, 0.06, 1.0],
-                "left_wall.pose": [0.0, 0.55, 0.50],
-                "right_wall.size": [1.2, 0.06, 1.0],
-                "right_wall.pose": [0.0, -0.55, 0.50],
+                "table.size": [1.20, 0.80, 0.025],
+                "table.pose": [0.40, -0.34, -0.0126],
+                "back_wall.size": [1.20, 0.05, 0.75],
+                "back_wall.pose": [0.40, -0.715, 0.375],
+                "left_wall.size": [0.05, 0.45, 0.75],
+                "left_wall.pose": [0.975, -0.505, 0.375],
+                "right_wall.size": [0.05, 0.45, 0.75],
+                "right_wall.pose": [-0.175, -0.505, 0.375],
+                "exclusion_region.size": [0.60, 0.80, 0.75],
+                "exclusion_region.pose": [0.70, -0.40, 0.375]
             }
         ],
     )
