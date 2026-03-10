@@ -46,16 +46,35 @@ struct JointDriveModel
   double torque_constant;
   double gear_ratio;
   double gear_efficiency;
+  double bias;
 };
 
 const std::vector<JointDriveModel> kJointModels = {
-  {0, 1, 0.0398, 30.0, 0.9},   // J1
-  {1, 2, 0.0398, 100.0, 0.65}, // J2
-  {2, 3, 0.0398, 30.0, 0.9},   // J3
-  {3, 4, 0.0251, 23.0, 0.9},   // J4
-  {4, 5, 0.0251, 23.0, 0.9},   // J5
-  {5, 7, 0.0251, 23.0, 0.9},   // J6 (ID 7, index 5)
+  {0, 1, 0.0398, 30.0, 0.9, 0.0},   // J1
+  {1, 2, 0.0398, 100.0, 0.65, 0.0}, // J2
+  {2, 3, 0.0398, 30.0, 0.9, 0.0},   // J3 <-- goes crazy when moving J4 such that further links are off-vertical
+  {3, 4, 0.0251, 23.0, 0.9, 0.0},   // J4
+  {4, 5, 0.0251, 23.0, 0.9, 0.0},   // J5
+  {5, 7, 0.0251, 23.0, 0.9, 0.0},   // J6 (ID 7, index 5)
 };
+
+// const std::vector<JointDriveModel> kJointModels = {
+//   {0, 1, 1.203439, 1.0, 1.0, 0.0},   // J1
+//   {1, 2, 3.982053, 1.0, 1.0, 0.0}, // J2
+//   {2, 3, 1.194331, 1.0, 1.0, 0.0},   // J3
+//   {3, 4, 0.578148, 1.0, 1.0, 0.0},   // J4
+//   {4, 5, 0.578432, 1.0, 1.0, 0.0},   // J5
+//   {5, 7, 0.579201, 1.0, 1.0, 0.0},   // J6 (ID 7, index 5)
+// };
+
+// const std::vector<JointDriveModel> kJointModels = {
+//   {0, 1, 1.0746, 1.0, 1.0, 0.0920},   // J1
+//   {1, 2, 3.494924, 1.0, 1.0, -0.0285},   // J2
+//   {2, 3, 0.705234, 1.0, 1.0, -0.0665},   // J3
+//   {3, 4, 0.386278, 1.0, 1.0, -0.0079},   // J4
+//   {4, 5, 0.178070, 1.0, 1.0, 0.3007},   // J5
+//   {5, 7, 0.579201, 1.0, 1.0, 0.0},   // J6 (ID 7, index 5)
+// };
 
 bool button_status(uint32_t flags)
 {
@@ -70,7 +89,7 @@ double torqueToCurrent(const double torque_nm, const JointDriveModel & model)
   if (std::abs(gain) < 1e-9) {
     return 0.0;
   }
-  double current = torque_nm / gain;
+  double current = torque_nm / gain + model.bias;
   current = std::max(-MAX_ABS_CURRENT_A, std::min(MAX_ABS_CURRENT_A, current));
   return current;
 }
