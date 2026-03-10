@@ -71,6 +71,12 @@ public:
     exclusion_region_size_ = this->declare_parameter<std::vector<double>>("exlcusion_region.size", {0.60, 0.80, 0.75});
     exclusion_region_pose_ = this->declare_parameter<std::vector<double>>("exclusion_region.pose", {0.70, -0.40, 0.375});
 
+    camera_1_size_ = this->declare_parameter<std::vector<double>>("camera_1.size", {0.05, 0.15, 0.05});
+    camera_1_pose_ = this->declare_parameter<std::vector<double>>("camera_1.pose", {-0.125, -0.505, 0.725});
+
+    camera_2_size_ = this->declare_parameter<std::vector<double>>("camera_2.size", {0.15, 0.05, 0.05});
+    camera_2_pose_ = this->declare_parameter<std::vector<double>>("camera_2.pose", {0.40, -0.665, 0.725});
+
 
     joint_state_sub_ = this->create_subscription<sensor_msgs::msg::JointState>(
       "/joint_states", 10,
@@ -122,6 +128,7 @@ public:
     }
 
     for (int target_idx = 0; target_idx < num_random_targets_ && rclcpp::ok(); ++target_idx) {
+    start:
       executor.spin_some();
 
       move_group.setStartStateToCurrentState();
@@ -131,13 +138,13 @@ public:
       const bool planned = static_cast<bool>(move_group.plan(plan));
       if (!planned) {
         RCLCPP_WARN(this->get_logger(), "Planning failed for random target %d", target_idx);
-        continue;
+        goto start;
       }
 
       const bool executed = static_cast<bool>(move_group.execute(plan));
       if (!executed) {
         RCLCPP_WARN(this->get_logger(), "Execution failed for random target %d", target_idx);
-        continue;
+        goto start;
       }
 
       std::this_thread::sleep_for(std::chrono::milliseconds(settle_time_ms_));
@@ -201,6 +208,8 @@ private:
     objects.push_back(makeBox("left_wall", left_wall_size_, left_wall_pose_));
     objects.push_back(makeBox("right_wall", right_wall_size_, right_wall_pose_));
     objects.push_back(makeBox("exclusion_region", exclusion_region_size_, exclusion_region_pose_));
+    objects.push_back(makeBox("camera_1", camera_1_size_, camera_1_pose_));
+    objects.push_back(makeBox("camera_2", camera_2_size_, camera_2_pose_));
 
     psi.applyCollisionObjects(objects);
   }
@@ -353,6 +362,10 @@ private:
   std::vector<double> right_wall_pose_;
   std::vector<double> exclusion_region_size_;
   std::vector<double> exclusion_region_pose_;
+  std::vector<double> camera_1_size_;
+  std::vector<double> camera_1_pose_;
+  std::vector<double> camera_2_size_;
+  std::vector<double> camera_2_pose_;
 
   std::unique_ptr<Robot> robot_;
   int actuator_count_;
