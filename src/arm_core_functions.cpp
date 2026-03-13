@@ -39,11 +39,7 @@ int64_t GetTickUs()
 #endif
 }
 
-/**************************
- * Example core functions *
- **************************/
-void move_to_start_position(k_api::Base::BaseClient* base)
-{
+void move_to_position(k_api::Base::BaseClient* base, const std::string& action_name) {
     // Make sure the arm is in Single Level Servoing before executing an Action
     auto servoingMode = k_api::Base::ServoingModeInformation();
     servoingMode.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
@@ -51,15 +47,15 @@ void move_to_start_position(k_api::Base::BaseClient* base)
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Move arm to ready position
-    std::cout << "Moving the arm to the start position" << std::endl;
+    std::cout << "Moving the arm to the position" << std::endl;
     auto action_type = k_api::Base::RequestedActionType();
     action_type.set_action_type(k_api::Base::REACH_JOINT_ANGLES);
     auto action_list = base->ReadAllActions(action_type);
     auto action_handle = k_api::Base::ActionHandle();
     action_handle.set_identifier(0);
-    for (auto action : action_list.action_list()) 
+    for (const auto& action : action_list.action_list()) 
     {
-        if (action.name() == "TeleopStart") 
+        if (action.name() == action_name) 
         {
             action_handle = action.handle();
         }
@@ -68,27 +64,32 @@ void move_to_start_position(k_api::Base::BaseClient* base)
     if (action_handle.identifier() == 0) 
     {
         std::cout << "Can't reach safe position, exiting" << std::endl;
+        return;
     } 
-    else 
-    {
-        bool action_finished = false; 
-        // Notify of any action topic event
-        auto options = k_api::Common::NotificationOptions();
-        auto notification_handle = base->OnNotificationActionTopic(
-            check_for_end_or_abort(action_finished),
-            options
-        );
+    
+    bool action_finished = false; 
+    // Notify of any action topic event
+    auto options = k_api::Common::NotificationOptions();
+    auto notification_handle = base->OnNotificationActionTopic(
+        check_for_end_or_abort(action_finished),
+        options
+    );
 
-        base->ExecuteActionFromReference(action_handle);
+    base->ExecuteActionFromReference(action_handle);
 
-        while(!action_finished)
-        { 
-            std::this_thread::sleep_for(ACTION_WAITING_TIME);
-        }
-
-        base->Unsubscribe(notification_handle);
+    while(!action_finished)
+    { 
+        std::this_thread::sleep_for(ACTION_WAITING_TIME);
     }
+
+    base->Unsubscribe(notification_handle);
 }
+
+void move_to_start_position(k_api::Base::BaseClient* base)
+{
+    move_to_position(base, "TeleopStart");
+}
+
 
 //Puts base in low-level servoing mode and initialize actuators to their current position to avoid fllowing errors
 k_api::BaseCyclic::Command setup_actuators_low_level(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicClient* base_cyclic, int actuator_count){

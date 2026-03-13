@@ -23,7 +23,6 @@ namespace k_api = Kinova::Api;
 
 class Robot {
 private:
-    // --- Member Variables ---
     std::string ip_address_;
     k_api::TransportClientTcp *transport_;
     k_api::RouterClient *router_;
@@ -36,29 +35,17 @@ private:
     k_api::SessionManager *session_manager_real_time_;
     k_api::ActuatorConfig::ActuatorConfigClient *actuator_config_;
     
-
-    // --- Private Member Function Declaration ---
-    // Only DECLARE it here. The definition (body) goes in the .cpp file.
     void create_api(std::string ip_address, std::string username, std::string password);
 
 public:
-    // --- Constructor Declaration ---
-    Robot(std::string ip_address, std::string username, std::string password);
-
-    // --- Destructor Declaration ---
+    Robot(const std::string& ip_address,
+          const std::string& username,
+          const std::string& password);
     ~Robot();
 
-    // --- Getter Declarations ---
-    // Added getter for base_
     k_api::Base::BaseClient* getBaseClient() const;
-
-    // Added getter for base_cyclic_
     k_api::BaseCyclic::BaseCyclicClient* getBaseCyclicClient() const;
-
-    // Added getter for actuator_config_
     k_api::ActuatorConfig::ActuatorConfigClient* getActuatorConfig() const;
-
-
 }; 
 
 #endif 

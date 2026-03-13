@@ -34,17 +34,17 @@ set(KORTEX_INCLUDE_DIRS
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/kortex_api/lib/release)
 
 add_executable(kinova_teleop
-  api_setup.cpp
-  arm_core_functions.cpp
-  leader.cpp)
+  src/api_setup.cpp
+  src/arm_core_functions.cpp
+  src/leader.cpp)
 target_include_directories(kinova_teleop PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_teleop PRIVATE _OS_UNIX DURATION=${DURATION})
 target_link_libraries(kinova_teleop KortexApiCpp pthread)
 
 add_executable(kinova_torque_control_test
-  api_setup.cpp
-  arm_core_functions.cpp
-  torque_control_test.cpp)
+  src/api_setup.cpp
+  src/arm_core_functions.cpp
+  src/torque_control_test.cpp)
 target_include_directories(kinova_torque_control_test PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_torque_control_test PRIVATE _OS_UNIX DURATION=${DURATION})
 target_link_libraries(kinova_torque_control_test KortexApiCpp pthread)
@@ -54,12 +54,11 @@ ament_target_dependencies(kinova_torque_control_test
   urdf)
 
 add_executable(kinova_moveit_current_logger
-  api_setup.cpp
-  moveit_random_pose_current_logger.cpp)
+  src/api_setup.cpp
+  src/moveit_random_pose_current_logger.cpp)
 target_include_directories(kinova_moveit_current_logger PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_moveit_current_logger PRIVATE _OS_UNIX)
-target_link_libraries(kinova_moveit_current_logger
-  KortexApiCpp
+target_link_libraries(kinova_moveit_current_logger KortexApiCpp
   pthread
   moveit_ros_planning_interface::moveit_move_group_interface)
 ament_target_dependencies(kinova_moveit_current_logger
