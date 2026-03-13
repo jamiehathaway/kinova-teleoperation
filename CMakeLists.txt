@@ -66,10 +66,20 @@ ament_target_dependencies(kinova_moveit_current_logger
   sensor_msgs
   moveit_ros_planning_interface)
 
+add_executable(kinova_motor_calibration
+  src/api_setup.cpp
+  src/arm_core_functions.cpp  
+  src/motor_calibration.cpp
+)
+target_include_directories(kinova_motor_calibration PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(kinova_motor_calibration PRIVATE _OS_UNIX)
+target_link_libraries(kinova_motor_calibration KortexApiCpp pthread)
+
 install(TARGETS
   kinova_teleop
   kinova_torque_control_test
   kinova_moveit_current_logger
+  kinova_motor_calibration
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch

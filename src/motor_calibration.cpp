@@ -1,0 +1,158 @@
+/*
+* KINOVA (R) KORTEX (TM)
+*
+* Copyright (c) 2018 Kinova inc. All rights reserved.
+*
+* This software may be modified and distributed
+* under the terms of the BSD 3-Clause license.
+*
+* Refer to the LICENSE file for details.
+*
+*/
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <math.h>
+
+#include <KDetailedException.h>
+
+#include <BaseClientRpc.h>
+#include <BaseCyclicClientRpc.h>
+#include <SessionClientRpc.h>
+#include <SessionManager.h>
+
+#include <RouterClient.h>
+#include <TransportClientTcp.h>
+#include <TransportClientUdp.h>
+
+#include <google/protobuf/util/json_util.h>
+
+#if defined(_MSC_VER)
+#include <Windows.h>
+#else
+#include <unistd.h>
+#endif
+#include <time.h>
+
+#include "api_setup.hpp"
+#include "arm_core_functions.hpp"
+
+namespace k_api = Kinova::Api;
+
+#define PORT 10000
+#define PORT_REAL_TIME 10001
+
+float velocity = 20.0f;         // Default velocity of the actuator (degrees per seconds)
+float time_duration = 20;        // Duration of the example (seconds)
+
+bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicClient* base_cyclic, int actuator_idx)
+{
+    bool return_status = true;
+
+    auto servoing_mode = k_api::Base::ServoingModeInformation();
+    auto base_command = k_api::BaseCyclic::Command();
+    auto base_feedback = k_api::BaseCyclic::Feedback();
+
+    std::vector<float> commands;
+    std::vector<float> original_positions;
+
+    int timer_count = 0;
+    int64_t now = 0;
+    int64_t last = 0;
+
+    int timeout = 0;
+
+    std::cout << "Initializing the arm for velocity low-level control example" << std::endl;
+    try
+    {
+        // Set the base in low-level servoing mode
+        servoing_mode.set_servoing_mode(k_api::Base::ServoingMode::LOW_LEVEL_SERVOING);
+        base->SetServoingMode(servoing_mode);
+        base_feedback = base_cyclic->RefreshFeedback();
+
+        int actuator_count = base->GetActuatorCount().count();
+
+        for(int i{0}; i < actuator_count; i++)
+        {
+            commands.push_back(base_feedback.actuators(i).position());
+            original_positions.push_back(base_feedback.actuators(i).position());
+            base_command.add_actuators()->set_position(base_feedback.actuators(i).position());
+        }
+
+        // Define the callback function used in Refresh_callback
+        auto lambda_fct_callback = [](const Kinova::Api::Error &err, const k_api::BaseCyclic::Feedback data)
+        {
+            // We are printing the data of the moving actuator just for the example purpose,
+            // avoid this in a real-time loop
+            std::string serialized_data;
+            google::protobuf::util::MessageToJsonString(data.actuators(data.actuators_size() - 1), &serialized_data);
+            std::cout << serialized_data << std::endl << std::endl;
+        };
+
+        // Real-time loop
+        while(timer_count < (time_duration * 1000))
+        {
+            now = GetTickUs();
+            if(now - last > 1000)
+            {
+                for(int i{0}; i < actuator_count; i++)
+                {
+        		    if(i == actuator_idx)
+        		    {
+                        // TODO: Fix jump in joint velocity
+                        commands[i] = original_positions[i] + 90*std::sin((2*M_PI/10) * (timer_count/1000.));
+                    	base_command.mutable_actuators(i)->set_position(fmod(commands[i], 360.0f));
+        		    }
+                }
+
+                try
+                {
+                    base_cyclic->Refresh(base_command);
+                }
+                catch(...)
+                {
+                    timeout++;
+                }
+                
+                timer_count++;
+                last = GetTickUs();
+            }
+        }
+    }
+    catch (k_api::KDetailedException& ex)
+    {
+        std::cout << "Kortex error: " << ex.what() << std::endl;
+        return_status = false;
+    }
+    catch (std::runtime_error& ex2)
+    {
+        std::cout << "Runtime error: " << ex2.what() << std::endl;
+        return_status = false;
+    }
+ 
+    // Set back the servoing mode to Single Level Servoing
+    servoing_mode.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
+    base->SetServoingMode(servoing_mode);
+
+    // Wait for a bit
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
+    return return_status;
+}
+
+int main(int argc, char **argv)
+{
+    Robot robot{"192.168.2.11", "admin", "admin"};
+    auto base = robot.getBaseClient();
+    auto base_cyclic = robot.getBaseCyclicClient();
+
+    move_to_position(base, "Upright");
+
+    // Example core
+    auto isOk = control_loop(base, base_cyclic, 4);
+    if (!isOk)
+    {
+        std::cout << "There has been an unexpected error in example_cyclic_armbase() function." << std::endl;
+    }
+}
