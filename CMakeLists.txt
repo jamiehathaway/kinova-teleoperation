@@ -6,7 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(kdl_parser REQUIRED)
@@ -75,11 +77,24 @@ target_include_directories(kinova_motor_calibration PRIVATE ${KORTEX_INCLUDE_DIR
 target_compile_definitions(kinova_motor_calibration PRIVATE _OS_UNIX)
 target_link_libraries(kinova_motor_calibration KortexApiCpp pthread)
 
+add_executable(kinova_follower
+  src/follower.cpp
+)
+ament_target_dependencies(kinova_follower
+  rclcpp
+  geometry_msgs
+  sensor_msgs
+  std_msgs
+  kdl_parser
+  urdf
+)
+
 install(TARGETS
   kinova_teleop
   kinova_torque_control_test
   kinova_moveit_current_logger
   kinova_motor_calibration
+  kinova_follower
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch
