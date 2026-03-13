@@ -100,9 +100,24 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
                 {
         		    if(i == actuator_idx)
         		    {
-                        // TODO: Fix jump in joint velocity
-                        commands[i] = original_positions[i] + 90*std::sin((2*M_PI/10) * (timer_count/1000.));
-                    	base_command.mutable_actuators(i)->set_position(fmod(commands[i], 360.0f));
+                        constexpr float kAmplitudeDeg{90.0f};
+                        constexpr float kPeriodSec{10.0f};
+                        constexpr float kRampDurationSec{1.0f};
+
+                        const float t = static_cast<float>(timer_count) * 0.001f;
+                        const float omega = (2.0f * static_cast<float>(M_PI)) / kPeriodSec;
+
+                        float ramp = 1.0f;
+                        if (t < kRampDurationSec)
+                        {
+                            const float x = t / kRampDurationSec;
+                            ramp = x * x * (3.0f - 2.0f * x);  // smoothstep: ramp(0)=0, ramp'(0)=0
+                        }
+
+                        commands[i] = original_positions[i] + kAmplitudeDeg * ramp * sinf(omega * t);
+                        float wrapped = fmodf(commands[i], 360.0f);
+                        if (wrapped < 0.0f) wrapped += 360.0f;
+                    	base_command.mutable_actuators(i)->set_position(wrapped);
         		    }
                 }
 
