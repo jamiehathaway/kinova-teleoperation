@@ -10,6 +10,7 @@
 *
 */
 
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -122,7 +123,7 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
 
                         commands[i] = original_positions[i] + kAmplitudeDeg * ramp * sinf(omega * t);
                         float wrapped = fmodf(commands[i], 360.0f);
-                        if (wrapped < 0.0f) wrapped += 360.0f;
+                        // if (wrapped < 0.0f) wrapped += 360.0f;
                     	base_command.mutable_actuators(i)->set_position(wrapped);
         		    }
                 }
@@ -168,18 +169,19 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
     return return_status;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     Robot robot{"192.168.2.11", "admin", "admin"};
     auto base = robot.getBaseClient();
     auto base_cyclic = robot.getBaseCyclicClient();
 
-    move_to_position(base, "Upright");
+    const unsigned int actuator_count{base->GetActuatorCount().count()};
 
-    // Example core
-    auto isOk = control_loop(base, base_cyclic, 4);
-    if (!isOk)
-    {
-        std::cout << "There has been an unexpected error in example_cyclic_armbase() function." << std::endl;
+    for (unsigned int i{0}; i < actuator_count; ++i) {
+        move_to_position(base, "MotorCalibJ" + std::to_string(i+1));
+        auto isOk = control_loop(base, base_cyclic, i);
+        if (!isOk)
+        {
+            std::cout << "There has been an unexpected error in example_cyclic_armbase() function." << std::endl;
+        }
     }
 }
