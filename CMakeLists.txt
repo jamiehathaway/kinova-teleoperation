@@ -55,6 +55,7 @@ ament_target_dependencies(kinova_torque_control_test
 
 add_executable(kinova_moveit_current_logger
   src/api_setup.cpp
+  src/csv_logger.cpp
   src/moveit_random_pose_current_logger.cpp)
 target_include_directories(kinova_moveit_current_logger PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_moveit_current_logger PRIVATE _OS_UNIX)

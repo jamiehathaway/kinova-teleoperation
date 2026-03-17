@@ -1,7 +1,5 @@
 #include <chrono>
 #include <cmath>
-#include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -21,6 +19,7 @@
 #include <shape_msgs/msg/solid_primitive.hpp>
 
 #include "api_setup.hpp"
+#include "csv_logger.hpp"
 
 namespace k_api = Kinova::Api;
 
@@ -99,12 +98,23 @@ public:
       }
     }
 
-    csv_.open(output_csv_.c_str(), std::ios::out | std::ios::trunc);
-    if (!csv_.is_open()) {
-      throw std::runtime_error("Unable to open CSV output file: " + output_csv_);
-    }
+    csv_logger_.open(output_csv_.c_str(), true);
 
-    writeCsvHeader();
+    const std::vector<std::string> fixed_columns = {"timestamp_ns", "target_idx", "sample_idx"};
+    const std::vector<CsvLogger::ColumnGroup> groups = {
+      {"position", joint_names_},
+      {"velocity", joint_names_},
+      {"motor_current", {}},
+      {"motor_torque", {}}
+    };
+    const std::vector<size_t> group_lengths = {
+      joint_names_.size(),
+      joint_names_.size(),
+      static_cast<size_t>(actuator_count_),
+      static_cast<size_t>(actuator_count_)
+    };
+
+    csv_logger_.setHeader(CsvLogger::BuildHeader(fixed_columns, groups, group_lengths));
     RCLCPP_INFO(this->get_logger(), "Logging to %s", output_csv_.c_str());
   }
 
@@ -158,7 +168,7 @@ public:
       RCLCPP_INFO(this->get_logger(), "Completed target %d/%d", target_idx + 1, num_random_targets_);
     }
 
-    csv_.flush();
+    csv_logger_.flush();
     RCLCPP_INFO(this->get_logger(), "Finished random-pose logging run.");
   }
 
@@ -263,24 +273,6 @@ private:
     return torques;
   }
 
-  void writeCsvHeader()
-  {
-    csv_ << "timestamp_ns,target_idx,sample_idx";
-    for (const auto & name : joint_names_) {
-      csv_ << "," << name << "_position";
-    }
-    for (const auto & name : joint_names_) {
-      csv_ << "," << name << "_velocity";
-    }
-    for (int i = 0; i < actuator_count_; ++i) {
-      csv_ << ",motor_current_" << (i + 1);
-    }
-    for (int i = 0; i < actuator_count_; ++i) {
-      csv_ << ",motor_torque_" << (i + 1);
-    }
-    csv_ << "\n";
-  }
-
   void logOneSample(int target_idx, int sample_idx)
   {
     sensor_msgs::msg::JointState joint_state;
@@ -311,28 +303,32 @@ private:
     const auto torques = readMotorTorques();
     const auto now_ns = this->get_clock()->now().nanoseconds();
 
-    csv_ << now_ns << "," << target_idx << "," << sample_idx;
+    std::vector<std::string> row;
+    row.reserve(3 + 2 * joint_names_.size() + 2 * static_cast<size_t>(actuator_count_));
+    row.push_back(std::to_string(now_ns));
+    row.push_back(std::to_string(target_idx));
+    row.push_back(std::to_string(sample_idx));
 
     for (const auto & name : joint_names_) {
       auto it = pos_map.find(name);
       const double v = (it == pos_map.end()) ? std::numeric_limits<double>::quiet_NaN() : it->second;
-      csv_ << "," << std::setprecision(12) << v;
+      row.push_back(CsvLogger::formatDouble(v));
     }
 
     for (const auto & name : joint_names_) {
       auto it = vel_map.find(name);
       const double v = (it == vel_map.end()) ? std::numeric_limits<double>::quiet_NaN() : it->second;
-      csv_ << "," << std::setprecision(12) << v;
+      row.push_back(CsvLogger::formatDouble(v));
     }
 
     for (double c : currents) {
-      csv_ << "," << std::setprecision(12) << c;
+      row.push_back(CsvLogger::formatDouble(c));
     }
     for (double t : torques) {
-      csv_ << "," << std::setprecision(12) << t;
+      row.push_back(CsvLogger::formatDouble(t));
     }
 
-    csv_ << "\n";
+    csv_logger_.writeRow(row);
   }
 
 private:
@@ -375,7 +371,7 @@ private:
   sensor_msgs::msg::JointState latest_joint_state_;
   bool have_joint_state_;
 
-  std::ofstream csv_;
+  CsvLogger csv_logger_;
 };
 
 int main(int argc, char ** argv)
