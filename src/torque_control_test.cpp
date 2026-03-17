@@ -26,6 +26,7 @@
 
 #include <api_setup.hpp>
 #include "arm_core_functions.hpp"
+#include "actuator_csv_logger.hpp"
 
 namespace k_api = Kinova::Api;
 
@@ -161,6 +162,11 @@ bool lead(Robot & leader)
   bool return_status = true;
 
   const unsigned int actuator_count = base_leader->GetActuatorCount().count();
+  constexpr int kLogEveryN = 10;  // 1 kHz loop -> 100 Hz logging to avoid heavy IO.
+  kinova_teleoperation::ActuatorCsvLogger logger(
+    "/workspaces/kinova-teleoperation/log/torque_control_log.csv",
+    static_cast<int>(actuator_count),
+    kLogEveryN);
 
   try {
     base_leader->ClearFaults();
@@ -245,8 +251,10 @@ bool lead(Robot & leader)
           base_command_leader.mutable_actuators(idx)->set_command_id(base_command_leader.frame_id());
         }
 
+        bool refreshed = false;
         try {
           base_feedback_leader = base_cyclic_leader->Refresh(base_command_leader, 0);
+          refreshed = true;
         } catch (k_api::KDetailedException & ex) {
           std::cout << "Kortex exception: " << ex.what() << std::endl;
           std::cout << "Error sub-code: "
@@ -257,6 +265,10 @@ bool lead(Robot & leader)
           std::cout << "runtime error: " << ex2.what() << std::endl;
         } catch (...) {
           std::cout << "Unknown error." << std::endl;
+        }
+
+        if (refreshed) {
+          logger.log(base_feedback_leader);
         }
 
         last = GetTickUs();

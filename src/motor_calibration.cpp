@@ -37,6 +37,7 @@
 
 #include "api_setup.hpp"
 #include "arm_core_functions.hpp"
+#include "actuator_csv_logger.hpp"
 
 namespace k_api = Kinova::Api;
 
@@ -71,7 +72,12 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
         base->SetServoingMode(servoing_mode);
         base_feedback = base_cyclic->RefreshFeedback();
 
-        int actuator_count = base->GetActuatorCount().count();
+        const int actuator_count = base->GetActuatorCount().count();
+        constexpr int kLogEveryN = 10;  // 1 kHz loop -> 100 Hz logging to avoid heavy IO.
+        kinova_teleoperation::ActuatorCsvLogger logger(
+          "/workspaces/kinova-teleoperation/log/motor_calibration_log.csv",
+          actuator_count,
+          kLogEveryN);
 
         for(int i{0}; i < actuator_count; i++)
         {
@@ -121,13 +127,19 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
         		    }
                 }
 
+                bool refreshed = false;
                 try
                 {
-                    base_cyclic->Refresh(base_command);
+                    base_feedback = base_cyclic->Refresh(base_command);
+                    refreshed = true;
                 }
                 catch(...)
                 {
                     timeout++;
+                }
+
+                if (refreshed) {
+                    logger.log(base_feedback);
                 }
                 
                 timer_count++;
