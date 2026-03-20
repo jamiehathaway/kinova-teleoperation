@@ -80,6 +80,12 @@ def parse_args() -> argparse.Namespace:
         help=f"Tip link for KDL chain (default: {DEFAULT_TIP_LINK})",
     )
     p.add_argument(
+        "--backend",
+        choices=["auto", "kdl", "pinocchio"],
+        default="pinocchio",
+        help="Gravity backend to use (default: pinocchio).",
+    )
+    p.add_argument(
         "--out-csv",
         default="",
         help="Optional output CSV path for fit results.",
@@ -212,7 +218,11 @@ def main() -> int:
             joint_names = [f"joint_{j}" for j in JOINTS]
             try:
                 model, gravity_backend = build_gravity_model(
-                    args.urdf, args.root_link, args.tip_link, joint_names
+                    args.urdf,
+                    args.root_link,
+                    args.tip_link,
+                    joint_names,
+                    backend=args.backend,
                 )
             except Exception as exc:
                 raise SystemExit(f"Failed to build gravity model: {exc}") from exc

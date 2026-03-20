@@ -36,7 +36,7 @@ Interpretation cues:
 
 Notes:
 - The script filters to low‑velocity samples (default 1.0 deg/s). Adjust with `--vel-threshold-deg`.
-- KDL is used first to match C++ behavior; if unavailable it falls back to Pinocchio and prints a warning.
+- Default backend is Pinocchio for ROS 2 Jazzy. Use `--backend kdl` if `kdl_parser_py` is available.
 
 ## fit_motor_constants.py
 
@@ -62,3 +62,4 @@ Notes:
 - Default torque source is URDF gravity (`--torque-source=gravity`).
 - `--torque-source=motor_torque` uses the logged torque as a proxy (guidance only).
 - The script filters to low‑velocity samples and can aggregate by target index.
+- Default backend is Pinocchio for ROS 2 Jazzy. Use `--backend kdl` if `kdl_parser_py` is available.

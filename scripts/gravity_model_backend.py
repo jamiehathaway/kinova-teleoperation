@@ -79,8 +79,20 @@ def build_gravity_model(
     root_link: str,
     tip_link: str,
     joint_names: Sequence[str],
+    backend: str = "auto",
 ) -> Tuple[GravityModelBase, str]:
     joint_count = len(joint_names)
+    backend = backend.lower().strip()
+
+    if backend == "kdl":
+        model = GravityModelKDL(urdf_path, root_link, tip_link, joint_count)
+        return model, "KDL"
+    if backend == "pinocchio":
+        model = GravityModelPinocchio(urdf_path, joint_names)
+        return model, "Pinocchio"
+    if backend != "auto":
+        raise ValueError(f"Unknown backend: {backend}")
+
     try:
         model = GravityModelKDL(urdf_path, root_link, tip_link, joint_count)
         return model, "KDL"
