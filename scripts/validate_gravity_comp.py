@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Validate gravity compensation model against torque_control_log CSVs.
 
-Compares model gravity torque (URDF/KDL or Pinocchio) to measured actuator torque.
-Focuses on low-velocity samples and produces plots + summary metrics.
+Computes gravity torque from the robot model, maps it to motor current using the
+same motor model as torque_control_test.cpp, and compares against measured current.
 """
 
 import argparse
@@ -27,6 +27,7 @@ DEFAULT_LOGS = [
 ]
 DEFAULT_ROOT_LINK = "base_link"
 DEFAULT_TIP_LINK = "tool_frame"
+MAX_ABS_CURRENT_A = 5.0
 
 
 @dataclass
@@ -125,6 +126,7 @@ def load_rows(paths: Sequence[str], vel_thresh_deg: float) -> List[Dict[str, flo
             for j in JOINTS:
                 required.append(f"actuator_{j}_position")
                 required.append(f"actuator_{j}_velocity")
+                required.append(f"actuator_{j}_current")
                 required.append(f"actuator_{j}_torque")
             try:
                 require_columns(header, required, path)
@@ -147,17 +149,33 @@ def load_rows(paths: Sequence[str], vel_thresh_deg: float) -> List[Dict[str, flo
                 }
                 for j in JOINTS:
                     parsed[f"pos_{j}"] = float(row[f"actuator_{j}_position"]) * DEG2RAD
+                    parsed[f"current_{j}"] = float(row[f"actuator_{j}_current"])
                     parsed[f"torque_{j}"] = float(row[f"actuator_{j}_torque"])
                 rows.append(parsed)
     return rows
 
 
-def compute_model(rows: List[Dict[str, float]], model) -> None:
+def torque_to_current(torque_nm: float, model) -> float:
+    gain = model.torque_constant * model.gear_ratio * model.gear_efficiency
+    if abs(gain) < 1e-9:
+        return 0.0
+    current = torque_nm / gain + model.bias
+    return max(-MAX_ABS_CURRENT_A, min(MAX_ABS_CURRENT_A, current))
+
+
+def compute_model(rows: List[Dict[str, float]], model, joint_models) -> None:
+    model_by_idx = {m.actuator_idx: m for m in joint_models}
+    missing = [j for j in range(len(JOINTS)) if j not in model_by_idx]
+    if missing:
+        raise SystemExit(f"Motor model missing actuator_idx entries: {missing}")
+
     for row in rows:
         q = [row[f"pos_{j}"] for j in JOINTS]
         tau = model.compute(q)
         for j, val in zip(JOINTS, tau):
             row[f"tau_model_{j}"] = val
+            model_entry = model_by_idx[j - 1]
+            row[f"current_model_{j}"] = torque_to_current(val, model_entry)
 
 
 def write_summary(stats: List[FitStats], csv_path: str, json_path: str) -> None:
@@ -185,8 +203,8 @@ def plot_per_joint(rows: List[Dict[str, float]], stats: List[FitStats], out_dir:
 
     # Per-joint plots
     for s in stats:
-        xs = [row[f"tau_model_{s.joint}"] for row in rows]
-        ys = [row[f"torque_{s.joint}"] for row in rows]
+        xs = [row[f"current_model_{s.joint}"] for row in rows]
+        ys = [row[f"current_{s.joint}"] for row in rows]
         fig, ax = plt.subplots(figsize=(5, 4), constrained_layout=True)
         ax.scatter(xs, ys, s=10, alpha=0.6)
         if not math.isnan(s.slope):
@@ -200,8 +218,8 @@ def plot_per_joint(rows: List[Dict[str, float]], stats: List[FitStats], out_dir:
                 label="fit",
             )
         ax.set_title(f"Joint {s.joint} (R^2={s.r2:.3f})")
-        ax.set_xlabel("gravity torque model (Nm)")
-        ax.set_ylabel("measured actuator torque (Nm)")
+        ax.set_xlabel("gravity-comp current model (A)")
+        ax.set_ylabel("measured actuator current (A)")
         ax.legend(loc="best", fontsize=8)
         fig.savefig(os.path.join(out_dir, f"gravity_sanity_joint{s.joint}.png"), dpi=150)
         plt.close(fig)
@@ -212,8 +230,8 @@ def plot_per_joint(rows: List[Dict[str, float]], stats: List[FitStats], out_dir:
         axes = axes.flatten()
         for idx, s in enumerate(stats):
             ax = axes[idx]
-            xs = [row[f"tau_model_{s.joint}"] for row in rows]
-            ys = [row[f"torque_{s.joint}"] for row in rows]
+            xs = [row[f"current_model_{s.joint}"] for row in rows]
+            ys = [row[f"current_{s.joint}"] for row in rows]
             ax.scatter(xs, ys, s=8, alpha=0.6)
             if not math.isnan(s.slope):
                 x_min, x_max = min(xs), max(xs)
@@ -225,8 +243,8 @@ def plot_per_joint(rows: List[Dict[str, float]], stats: List[FitStats], out_dir:
                     linewidth=2,
                 )
             ax.set_title(f"J{s.joint} R^2={s.r2:.3f}")
-            ax.set_xlabel("model (Nm)")
-            ax.set_ylabel("meas (Nm)")
+            ax.set_xlabel("model (A)")
+            ax.set_ylabel("meas (A)")
         fig.savefig(grid_path, dpi=150)
         plt.close(fig)
 
@@ -262,12 +280,12 @@ def main() -> int:
     except Exception as exc:
         raise SystemExit(f"Failed to build gravity model: {exc}") from exc
 
-    compute_model(rows, model)
+    compute_model(rows, model, joint_models)
 
     stats: List[FitStats] = []
     for j in JOINTS:
-        xs = [row[f"tau_model_{j}"] for row in rows]
-        ys = [row[f"torque_{j}"] for row in rows]
+        xs = [row[f"current_model_{j}"] for row in rows]
+        ys = [row[f"current_{j}"] for row in rows]
         slope, intercept, r2, rmse, bias, corr = fit_line_full(xs, ys)
         stats.append(
             FitStats(

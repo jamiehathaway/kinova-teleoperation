@@ -8,7 +8,7 @@ Motor model configuration shared by C++ and Python:
 
 ## validate_gravity_comp.py
 
-Purpose: sanity‑check the gravity model used in `torque_control_test.cpp` by comparing model gravity torque against measured actuator torque from free‑drive logs.
+Purpose: sanity‑check the gravity model used in `torque_control_test.cpp` by comparing model **gravity‑compensation current** against measured actuator current from free‑drive logs.
 
 Usage:
 ```bash
@@ -22,8 +22,8 @@ Key outputs:
 
 How to read the plots:
 - Each point is a low‑velocity sample.
-- X‑axis is **model gravity torque** (URDF/KDL or Pinocchio fallback).
-- Y‑axis is **measured actuator torque** from the log.
+- X‑axis is **model gravity‑comp current** (gravity torque mapped through the motor model).
+- Y‑axis is **measured actuator current** from the log.
 - **1:1 dashed line** means perfect agreement (y = x).
 - **Solid fit line** is the best‑fit linear relationship between model and measurement.
 
@@ -36,6 +36,7 @@ Interpretation cues:
 
 Notes:
 - The script filters to low‑velocity samples (default 1.0 deg/s). Adjust with `--vel-threshold-deg`.
+- Motor model is loaded from `motor_model.csv` and used to map torque to current (with the same clamp as C++).
 - Default backend is Pinocchio for ROS 2 Jazzy. Use `--backend kdl` if `kdl_parser_py` is available.
 
 ## fit_motor_constants.py
