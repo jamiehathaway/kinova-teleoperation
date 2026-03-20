@@ -247,14 +247,14 @@ def main() -> int:
         return 2
 
     # Build gravity model
-    joint_names = [f\"joint_{j}\" for j in JOINTS]
+    joint_names = [f"joint_{j}" for j in JOINTS]
     try:
         model, backend = build_gravity_model(
             args.urdf, args.root_link, args.tip_link, joint_names
         )
-        print(f\"Using gravity backend: {backend}\")
+        print(f"Using gravity backend: {backend}")
     except Exception as exc:
-        raise SystemExit(f\"Failed to build gravity model: {exc}\") from exc
+        raise SystemExit(f"Failed to build gravity model: {exc}") from exc
 
     compute_model(rows, model)
 
