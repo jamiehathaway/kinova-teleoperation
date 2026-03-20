@@ -76,7 +76,7 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
         const int actuator_count = base->GetActuatorCount().count();
         constexpr int kLogEveryN = 10;  // 1 kHz loop -> 100 Hz logging to avoid heavy IO.
         kinova_teleoperation::ActuatorCsvLogger logger(
-          "/workspaces/kinova-teleoperation/log/motor_calibration_log.csv",
+          "/workspaces/kinova-teleoperation/log/motor_calibration_log_j" + std::to_string(actuator_idx + 1) + ".csv",
           actuator_count,
           kLogEveryN);
 
