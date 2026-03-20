@@ -15,11 +15,16 @@ import math
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List
+
+from gravity_model_backend import build_gravity_model
+from motor_model_utils import fit_line, require_columns
 
 
 JOINTS = [1, 2, 3, 4, 5, 6]
 DEFAULT_URDF = "src/ros2_kortex/kortex_description/robots/gen3_lite.urdf"
+DEFAULT_ROOT_LINK = "base_link"
+DEFAULT_TIP_LINK = "tool_frame"
 
 
 @dataclass
@@ -65,6 +70,16 @@ def parse_args() -> argparse.Namespace:
         help=f"URDF path for gravity model (default: {DEFAULT_URDF})",
     )
     p.add_argument(
+        "--root-link",
+        default=DEFAULT_ROOT_LINK,
+        help=f"Root link for KDL chain (default: {DEFAULT_ROOT_LINK})",
+    )
+    p.add_argument(
+        "--tip-link",
+        default=DEFAULT_TIP_LINK,
+        help=f"Tip link for KDL chain (default: {DEFAULT_TIP_LINK})",
+    )
+    p.add_argument(
         "--out-csv",
         default="",
         help="Optional output CSV path for fit results.",
@@ -87,14 +102,15 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def require_columns(header: Iterable[str], columns: Iterable[str], csv_path: str) -> None:
-    missing = [c for c in columns if c not in header]
-    if missing:
+def require_columns_or_exit(header, columns, csv_path: str) -> None:
+    try:
+        require_columns(header, columns, csv_path)
+    except ValueError as exc:
         msg = (
-            f"Missing required columns in {csv_path}: {', '.join(missing)}\n"
+            f"{exc}\n"
             "Hint: log/moveit_current_log_full.csv includes motor current/torque columns."
         )
-        raise SystemExit(msg)
+        raise SystemExit(msg) from exc
 
 
 def median(values: List[float]) -> float:
@@ -132,81 +148,8 @@ def aggregate_rows(rows: List[Dict[str, float]], aggregate: str) -> List[Dict[st
     return aggregated
 
 
-def fit_affine(pairs: List[Tuple[float, float]]) -> Tuple[float, float, float]:
-    # pairs: (tau, current)
-    n = len(pairs)
-    if n < 2:
-        return float("nan"), float("nan"), float("nan")
-    xs = [p[0] for p in pairs]
-    ys = [p[1] for p in pairs]
-    mean_x = sum(xs) / n
-    mean_y = sum(ys) / n
-    var_x = sum((x - mean_x) ** 2 for x in xs)
-    if var_x == 0.0:
-        return float("nan"), float("nan"), float("nan")
-    cov_xy = sum((x - mean_x) * (y - mean_y) for x, y in pairs)
-    a = cov_xy / var_x
-    b = mean_y - a * mean_x
-
-    # R^2
-    ss_tot = sum((y - mean_y) ** 2 for y in ys)
-    ss_res = sum((y - (a * x + b)) ** 2 for x, y in pairs)
-    r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else float("nan")
-    return a, b, r2
 
 
-def try_import_pinocchio() -> "object":
-    try:
-        import pinocchio as pin  # type: ignore
-    except Exception as exc:
-        msg = (
-            "Pinocchio is required for --torque-source=gravity but is not available.\n"
-            "Run this inside the ROS 2 Jazzy container where pinocchio is installed, or\n"
-            "switch to --torque-source=motor_torque.\n"
-            f"Original import error: {exc}"
-        )
-        raise SystemExit(msg) from exc
-    return pin
-
-
-def build_gravity_model(pin: "object", urdf_path: str) -> Tuple["object", "object"]:
-    model = pin.buildModelFromUrdf(urdf_path)
-    data = model.createData()
-    return model, data
-
-
-def joint_name_for_index(j: int) -> str:
-    return f"joint_{j}"
-
-
-def fill_configuration(model: "object", joint_positions: Dict[int, float]) -> "object":
-    import numpy as np
-    q = np.zeros(model.nq)
-    for j, pos in joint_positions.items():
-        name = joint_name_for_index(j)
-        jid = model.getJointId(name)
-        if jid == 0:
-            raise SystemExit(f"Joint '{name}' not found in URDF model.")
-        idx = model.joints[jid].idx_q
-        nq = model.joints[jid].nq
-        if nq != 1:
-            raise SystemExit(f"Joint '{name}' expected 1 DoF, got {nq}.")
-        q[idx] = pos
-    return q
-
-
-def gravity_torque(
-    pin: "object", model: "object", data: "object", joint_positions: Dict[int, float]
-) -> Dict[int, float]:
-    q = fill_configuration(model, joint_positions)
-    tau = pin.computeGeneralizedGravity(model, data, q)
-    out: Dict[int, float] = {}
-    for j in JOINTS:
-        name = joint_name_for_index(j)
-        jid = model.getJointId(name)
-        idx = model.joints[jid].idx_v
-        out[j] = float(tau[idx])
-    return out
 
 
 def plot_fits(
@@ -262,11 +205,17 @@ def main() -> int:
             else:
                 required.append(f"joint_{j}_position")
 
-        require_columns(header, required, args.csv)
+        require_columns_or_exit(header, required, args.csv)
 
+        gravity_backend = ""
         if args.torque_source == "gravity":
-            pin = try_import_pinocchio()
-            model, data = build_gravity_model(pin, args.urdf)
+            joint_names = [f"joint_{j}" for j in JOINTS]
+            try:
+                model, gravity_backend = build_gravity_model(
+                    args.urdf, args.root_link, args.tip_link, joint_names
+                )
+            except Exception as exc:
+                raise SystemExit(f"Failed to build gravity model: {exc}") from exc
 
         rows: List[Dict[str, float]] = []
         for row in reader:
@@ -285,10 +234,10 @@ def main() -> int:
                 for j in JOINTS:
                     parsed[f"tau_{j}"] = float(row[f"motor_torque_{j}"])
             else:
-                joint_positions = {j: float(row[f"joint_{j}_position"]) for j in JOINTS}
-                tau = gravity_torque(pin, model, data, joint_positions)
-                for j in JOINTS:
-                    parsed[f"tau_{j}"] = tau[j]
+                q = [float(row[f"joint_{j}_position"]) for j in JOINTS]
+                tau = model.compute(q)
+                for j, val in zip(JOINTS, tau):
+                    parsed[f"tau_{j}"] = val
 
             rows.append(parsed)
 
@@ -301,12 +250,13 @@ def main() -> int:
     results: List[FitResult] = []
     for j in JOINTS:
         pairs = [(r[f"tau_{j}"], r[f"motor_current_{j}"]) for r in rows]
-        a, b, r2 = fit_affine(pairs)
+        a, b, r2 = fit_line([p[0] for p in pairs], [p[1] for p in pairs])
         kt = 1.0 / a if a not in (0.0, float("nan")) else float("nan")
         results.append(FitResult(joint=j, n=len(pairs), a=a, b=b, kt=kt, r2=r2))
 
     if args.torque_source == "gravity":
-        print(f"Using gravity torque from URDF: {args.urdf}")
+        print(f"Using gravity backend: {gravity_backend}")
+        print(f"URDF: {args.urdf}")
     else:
         print("Using motor_torque_* as proxy torque (guidance only).")
     print(f"Samples used: {len(rows)} (aggregate={args.aggregate}, vel_thresh={args.velocity_threshold})")
