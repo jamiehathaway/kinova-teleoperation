@@ -4,7 +4,7 @@ import csv
 import math
 import os
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 @dataclass
@@ -15,6 +15,8 @@ class JointModel:
     gear_ratio: float
     gear_efficiency: float
     bias: float
+    coulomb_friction: float
+    viscous_damping: float
 
 
 def resolve_motor_model_path() -> str:
@@ -51,6 +53,8 @@ def load_motor_model_csv(path: str) -> List[JointModel]:
         for row in reader:
             if not row:
                 continue
+            coulomb = float(row.get("coulomb_friction", 0.0) or 0.0)
+            viscous = float(row.get("viscous_damping", 0.0) or 0.0)
             models.append(
                 JointModel(
                     actuator_idx=int(float(row["actuator_idx"])),
@@ -59,6 +63,8 @@ def load_motor_model_csv(path: str) -> List[JointModel]:
                     gear_ratio=float(row["gear_ratio"]),
                     gear_efficiency=float(row["gear_efficiency"]),
                     bias=float(row["bias"]),
+                    coulomb_friction=coulomb,
+                    viscous_damping=viscous,
                 )
             )
 
@@ -115,3 +121,60 @@ def fit_line_full(xs: Sequence[float], ys: Sequence[float]) -> Tuple[float, floa
     std_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys) / n) if n > 0 else float("nan")
     corr = cov_xy / (n * std_x * std_y) if std_x > 0 and std_y > 0 else float("nan")
     return slope, intercept, r2, rmse, bias, corr
+
+
+def fit_drive_model(
+    torque_nm: Sequence[float],
+    current_a: Sequence[float],
+    velocity_rad_s: Sequence[float],
+) -> Tuple[float, float, float, float, float, float]:
+    """Fit current = b + a*tau + c*sign(qdot) + d*qdot.
+
+    Returns (a, b, c, d, r2, rmse).
+    """
+    try:
+        import numpy as np
+    except Exception as exc:
+        raise RuntimeError("numpy is required for drive model fitting") from exc
+
+    if len(torque_nm) < 2:
+        return float("nan"), float("nan"), float("nan"), float("nan"), float("nan"), float("nan")
+
+    tau = np.asarray(torque_nm, dtype=float)
+    curr = np.asarray(current_a, dtype=float)
+    vel = np.asarray(velocity_rad_s, dtype=float)
+    sign = np.sign(vel)
+    X = np.column_stack([tau, np.ones_like(tau), sign, vel])
+    coeffs, _, _, _ = np.linalg.lstsq(X, curr, rcond=None)
+    a, b, c, d = [float(x) for x in coeffs]
+
+    pred = X @ coeffs
+    resid = curr - pred
+    ss_tot = float(((curr - curr.mean()) ** 2).sum())
+    ss_res = float((resid ** 2).sum())
+    r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else float("nan")
+    rmse = float((ss_res / len(curr)) ** 0.5)
+    return a, b, c, d, r2, rmse
+
+
+def torque_to_current(
+    torque_nm: float,
+    qdot_rad_s: float,
+    model: JointModel,
+    clamp: Optional[float] = None,
+) -> float:
+    gain = model.torque_constant * model.gear_ratio * model.gear_efficiency
+    if abs(gain) < 1e-9:
+        return 0.0
+
+    friction = 0.0
+    if qdot_rad_s > 0.0:
+        friction = model.coulomb_friction
+    elif qdot_rad_s < 0.0:
+        friction = -model.coulomb_friction
+    friction += model.viscous_damping * qdot_rad_s
+
+    current = (torque_nm + friction) / gain + model.bias
+    if clamp is not None:
+        current = max(-clamp, min(clamp, current))
+    return current
