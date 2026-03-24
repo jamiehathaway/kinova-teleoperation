@@ -9,7 +9,7 @@ Columns: `actuator_idx, actuator_id, torque_constant, gear_ratio, gear_efficienc
 
 ## validate_gravity_comp.py
 
-Purpose: sanity‑check the gravity model used in `torque_control_test.cpp` by comparing model **gravity‑compensation current** against measured actuator current from free‑drive logs.
+Purpose: sanity‑check model‑based compensation by comparing **model‑predicted current** against measured actuator current from free‑drive logs.
 
 Usage:
 ```bash
@@ -39,6 +39,7 @@ Notes:
 - The script filters to low‑velocity samples (default 1.0 deg/s). Adjust with `--vel-threshold-deg`.
 - Motor model is loaded from `motor_model.csv` and used to map torque to current (with the same clamp as C++).
 - Default backend is Pinocchio for ROS 2 Jazzy. Use `--backend kdl` if `kdl_parser_py` is available.
+- Use `--mode full` to compute full dynamics (gravity + coriolis + inertia) with Pinocchio and all samples.
 
 ## fit_motor_constants.py
 
