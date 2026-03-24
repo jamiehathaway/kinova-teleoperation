@@ -45,6 +45,7 @@ add_executable(kinova_torque_control_test
   src/api_setup.cpp
   src/arm_core_functions.cpp
   src/actuator_csv_logger.cpp
+  src/motor_model_utils.cpp
   src/torque_control_test.cpp)
 target_include_directories(kinova_torque_control_test PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_torque_control_test PRIVATE _OS_UNIX DURATION=${DURATION})
@@ -71,11 +72,16 @@ add_executable(kinova_motor_calibration
   src/api_setup.cpp
   src/arm_core_functions.cpp  
   src/actuator_csv_logger.cpp
+  src/motor_model_utils.cpp
   src/motor_calibration.cpp
 )
 target_include_directories(kinova_motor_calibration PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_motor_calibration PRIVATE _OS_UNIX)
 target_link_libraries(kinova_motor_calibration KortexApiCpp pthread)
+ament_target_dependencies(kinova_motor_calibration
+  ament_index_cpp
+  kdl_parser
+  urdf)
 
 install(TARGETS
   kinova_teleop

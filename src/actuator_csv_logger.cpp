@@ -8,10 +8,14 @@ namespace kinova_teleoperation
 {
 
 ActuatorCsvLogger::ActuatorCsvLogger(
-  const std::string & output_csv, int actuator_count, int sample_stride)
+  const std::string & output_csv,
+  int actuator_count,
+  int sample_stride,
+  bool include_predicted_currents)
 : actuator_count_(actuator_count),
   sample_stride_(sample_stride),
-  sample_index_(0)
+  sample_index_(0),
+  include_predicted_currents_(include_predicted_currents)
 {
   csv_.open(output_csv.c_str(), std::ios::out | std::ios::trunc);
   if (!csv_.is_open()) {
@@ -36,6 +40,13 @@ bool ActuatorCsvLogger::isOpen() const
 }
 
 void ActuatorCsvLogger::log(const Kinova::Api::BaseCyclic::Feedback & feedback)
+{
+  log(feedback, {});
+}
+
+void ActuatorCsvLogger::log(
+  const Kinova::Api::BaseCyclic::Feedback & feedback,
+  const std::vector<double> & predicted_currents)
 {
   if (!csv_.is_open()) {
     return;
@@ -78,6 +89,15 @@ void ActuatorCsvLogger::log(const Kinova::Api::BaseCyclic::Feedback & feedback)
     csv_ << "," << std::setprecision(12) << value;
   }
 
+  if (include_predicted_currents_) {
+    for (int i = 0; i < actuator_count_; ++i) {
+      const double value = (i < static_cast<int>(predicted_currents.size()))
+        ? predicted_currents[i]
+        : std::numeric_limits<double>::quiet_NaN();
+      csv_ << "," << std::setprecision(12) << value;
+    }
+  }
+
   csv_ << "\n";
 }
 
@@ -95,6 +115,11 @@ void ActuatorCsvLogger::writeHeader()
   }
   for (int i = 0; i < actuator_count_; ++i) {
     csv_ << ",actuator_" << (i + 1) << "_torque";
+  }
+  if (include_predicted_currents_) {
+    for (int i = 0; i < actuator_count_; ++i) {
+      csv_ << ",actuator_" << (i + 1) << "_current_model";
+    }
   }
   csv_ << "\n";
 }

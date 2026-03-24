@@ -12,25 +12,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
-#include <memory>
 #include <stdexcept>
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <kdl/chaindynparam.hpp>
-#include <kdl/chain.hpp>
-#include <kdl/jntarray.hpp>
-#include <kdl/tree.hpp>
-#include <kdl_parser/kdl_parser.hpp>
-#include <urdf/model.h>
 
 #include <api_setup.hpp>
 #include "arm_core_functions.hpp"
 #include "actuator_csv_logger.hpp"
+#include "motor_model_utils.hpp"
 
 namespace k_api = Kinova::Api;
 
@@ -44,162 +36,12 @@ namespace
 constexpr double DEG2RAD = M_PI / 180.0;
 constexpr double MAX_ABS_CURRENT_A = 5.0;  // Conservative clamp.
 
-struct JointDriveModel
-{
-  int actuator_idx;   // 0-based cyclic index
-  int actuator_id;    // Kortex actuator ID for control mode setup
-  double torque_constant;
-  double gear_ratio;
-  double gear_efficiency;
-  double bias;
-};
-
-std::string resolve_motor_model_path()
-{
-  if (const char * env = std::getenv("KINOVA_TELEOP_MOTOR_MODEL")) {
-    return std::string(env);
-  }
-
-  try {
-    const auto share_dir = ament_index_cpp::get_package_share_directory("kinova_teleoperation");
-    return share_dir + "/config/motor_model.csv";
-  } catch (...) {
-    // Fall back to a workspace-relative path if ament index is unavailable.
-    return "src/kinova_teleoperation/config/motor_model.csv";
-  }
-}
-
-std::vector<std::string> split_csv_line(const std::string & line)
-{
-  std::vector<std::string> tokens;
-  std::stringstream ss(line);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    // Trim whitespace.
-    item.erase(0, item.find_first_not_of(" \t\r\n"));
-    item.erase(item.find_last_not_of(" \t\r\n") + 1);
-    tokens.push_back(item);
-  }
-  return tokens;
-}
-
-std::vector<JointDriveModel> load_joint_models(const std::string & path)
-{
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    throw std::runtime_error("Unable to open motor model file: " + path);
-  }
-
-  std::vector<JointDriveModel> models;
-  std::string line;
-  bool header_skipped = false;
-  while (std::getline(file, line)) {
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
-    if (!header_skipped) {
-      header_skipped = true;
-      continue;
-    }
-    const auto tokens = split_csv_line(line);
-    if (tokens.size() < 6) {
-      continue;
-    }
-    JointDriveModel model{};
-    model.actuator_idx = std::stoi(tokens[0]);
-    model.actuator_id = std::stoi(tokens[1]);
-    model.torque_constant = std::stod(tokens[2]);
-    model.gear_ratio = std::stod(tokens[3]);
-    model.gear_efficiency = std::stod(tokens[4]);
-    model.bias = std::stod(tokens[5]);
-    models.push_back(model);
-  }
-
-  if (models.empty()) {
-    throw std::runtime_error("Motor model file contains no entries: " + path);
-  }
-  return models;
-}
-
 bool button_status(uint32_t flags)
 {
   const uint32_t MASK_BIT_26 = (1U << 26);
   const uint32_t MASK_BIT_27 = (1U << 27);
   return ((flags & MASK_BIT_26) != 0) || ((flags & MASK_BIT_27) != 0);
 }
-
-double torqueToCurrent(const double torque_nm, const JointDriveModel & model)
-{
-  const double gain = model.torque_constant * model.gear_ratio * model.gear_efficiency;
-  if (std::abs(gain) < 1e-9) {
-    return 0.0;
-  }
-  double current = torque_nm / gain + model.bias;
-  current = std::max(-MAX_ABS_CURRENT_A, std::min(MAX_ABS_CURRENT_A, current));
-  return current;
-}
-
-class GravityModel
-{
-public:
-  GravityModel(
-    const std::string & urdf_path,
-    const std::string & root_link,
-    const std::string & tip_link,
-    size_t joint_count)
-  : joint_count_(joint_count)
-  {
-    urdf::Model urdf_model;
-    if (!urdf_model.initFile(urdf_path)) {
-      throw std::runtime_error("Failed to parse URDF file: " + urdf_path);
-    }
-
-    KDL::Tree tree;
-    if (!kdl_parser::treeFromUrdfModel(urdf_model, tree)) {
-      throw std::runtime_error("Failed to build KDL tree from URDF: " + urdf_path);
-    }
-
-    if (!tree.getChain(root_link, tip_link, chain_)) {
-      throw std::runtime_error("Failed to extract KDL chain from " + root_link + " to " + tip_link);
-    }
-
-    if (chain_.getNrOfJoints() < joint_count_) {
-      throw std::runtime_error("KDL chain has fewer joints than expected for Gen3 Lite");
-    }
-
-    q_ = KDL::JntArray(chain_.getNrOfJoints());
-    gravity_tau_ = KDL::JntArray(chain_.getNrOfJoints());
-    dyn_solver_ = std::make_unique<KDL::ChainDynParam>(chain_, KDL::Vector(0.0, 0.0, -9.81));
-  }
-
-  std::vector<double> computeGravityTorques(const std::vector<double> & joint_pos_rad)
-  {
-    if (joint_pos_rad.size() < joint_count_) {
-      throw std::runtime_error("Insufficient joint positions provided to gravity solver");
-    }
-
-    for (unsigned int i = 0; i < chain_.getNrOfJoints(); ++i) {
-      q_(i) = (i < joint_pos_rad.size()) ? joint_pos_rad[i] : 0.0;
-    }
-
-    if (dyn_solver_->JntToGravity(q_, gravity_tau_) < 0) {
-      throw std::runtime_error("KDL JntToGravity failed");
-    }
-
-    std::vector<double> tau(joint_count_, 0.0);
-    for (size_t i = 0; i < joint_count_; ++i) {
-      tau[i] = gravity_tau_(static_cast<unsigned int>(i));
-    }
-    return tau;
-  }
-
-private:
-  KDL::Chain chain_;
-  KDL::JntArray q_;
-  KDL::JntArray gravity_tau_;
-  std::unique_ptr<KDL::ChainDynParam> dyn_solver_;
-  size_t joint_count_;
-};
 
 } // namespace
 
@@ -245,16 +87,17 @@ bool lead(Robot & leader)
     return false;
   }
 
-  const std::string motor_model_path = resolve_motor_model_path();
-  std::vector<JointDriveModel> joint_models;
+  const std::string motor_model_path = kinova_teleoperation::resolveMotorModelPath();
+  std::vector<kinova_teleoperation::JointDriveModel> joint_models;
   try {
-    joint_models = load_joint_models(motor_model_path);
+    joint_models = kinova_teleoperation::loadJointModels(motor_model_path);
   } catch (const std::exception & ex) {
     std::cerr << "Unable to load motor model: " << ex.what() << std::endl;
     return false;
   }
 
-  GravityModel gravity_model(urdf_path, "base_link", "tool_frame", joint_models.size());
+  kinova_teleoperation::GravityModel gravity_model(
+    urdf_path, "base_link", "tool_frame", joint_models.size());
 
   try {
     base_command_leader = setup_actuators_low_level(base_leader, base_cyclic_leader, actuator_count);
@@ -289,7 +132,10 @@ bool lead(Robot & leader)
           // Keep position command at measured value to avoid following errors.
           base_command_leader.mutable_actuators(idx)->set_position(base_feedback_leader.actuators(idx).position());
 
-          const double grav_current = torqueToCurrent(gravity_tau[i], model);
+          const double vel_rad_s =
+            static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
+          const double grav_current = kinova_teleoperation::torqueToCurrent(
+            gravity_tau[i], vel_rad_s, model, MAX_ABS_CURRENT_A);
           // std::cout << grav_current << ", ";
           base_command_leader.mutable_actuators(idx)->set_current_motor(static_cast<float>(grav_current));
         }

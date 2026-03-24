@@ -16,6 +16,8 @@
 #include <vector>
 #include <math.h>
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
 #include <KDetailedException.h>
 
 #include <BaseClientRpc.h>
@@ -39,11 +41,13 @@
 #include "api_setup.hpp"
 #include "arm_core_functions.hpp"
 #include "actuator_csv_logger.hpp"
+#include "motor_model_utils.hpp"
 
 namespace k_api = Kinova::Api;
 
 #define PORT 10000
 #define PORT_REAL_TIME 10001
+constexpr double DEG2RAD = M_PI / 180.0;
 
 float velocity = 20.0f;         // Default velocity of the actuator (degrees per seconds)
 float time_duration = 20;        // Duration of the example (seconds)
@@ -78,7 +82,49 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
         kinova_teleoperation::ActuatorCsvLogger logger(
           "/workspaces/kinova-teleoperation/log/motor_calibration_log_j" + std::to_string(actuator_idx + 1) + ".csv",
           actuator_count,
-          kLogEveryN);
+          kLogEveryN,
+          true);
+
+        std::string urdf_path;
+        try {
+            const auto share_dir = ament_index_cpp::get_package_share_directory("kortex_description");
+            urdf_path = share_dir + "/robots/gen3_lite.urdf";
+        } catch (const std::exception & ex) {
+            std::cerr << "Unable to locate kortex_description package: " << ex.what() << std::endl;
+            return false;
+        }
+
+        std::vector<kinova_teleoperation::JointDriveModel> joint_models;
+        try {
+            const auto motor_model_path = kinova_teleoperation::resolveMotorModelPath();
+            joint_models = kinova_teleoperation::loadJointModels(motor_model_path);
+        } catch (const std::exception & ex) {
+            std::cerr << "Unable to load motor model: " << ex.what() << std::endl;
+            return false;
+        }
+
+        if (joint_models.size() < static_cast<size_t>(actuator_count)) {
+            std::cerr << "Motor model has fewer entries than actuators." << std::endl;
+            return false;
+        }
+
+        std::vector<kinova_teleoperation::JointDriveModel> model_by_idx(actuator_count);
+        std::vector<bool> has_model(actuator_count, false);
+        for (const auto & model : joint_models) {
+            if (model.actuator_idx >= 0 && model.actuator_idx < actuator_count) {
+                model_by_idx[model.actuator_idx] = model;
+                has_model[model.actuator_idx] = true;
+            }
+        }
+        for (int i = 0; i < actuator_count; ++i) {
+            if (!has_model[i]) {
+                std::cerr << "Motor model missing actuator_idx " << i << std::endl;
+                return false;
+            }
+        }
+
+        kinova_teleoperation::GravityModel gravity_model(
+          urdf_path, "base_link", "tool_frame", joint_models.size());
 
         for(int i{0}; i < actuator_count; i++)
         {
@@ -123,7 +169,6 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
 
                         commands[i] = original_positions[i] + kAmplitudeDeg * ramp * sinf(omega * t);
                         float wrapped = fmodf(commands[i], 360.0f);
-                        // if (wrapped < 0.0f) wrapped += 360.0f;
                     	base_command.mutable_actuators(i)->set_position(wrapped);
         		    }
                 }
@@ -140,7 +185,21 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
                 }
 
                 if (refreshed) {
-                    logger.log(base_feedback);
+                    std::vector<double> q_rad(actuator_count, 0.0);
+                    std::vector<double> qdot_rad(actuator_count, 0.0);
+                    for (int i = 0; i < actuator_count; ++i) {
+                        q_rad[i] = static_cast<double>(base_feedback.actuators(i).position()) * DEG2RAD;
+                        qdot_rad[i] = static_cast<double>(base_feedback.actuators(i).velocity()) * DEG2RAD;
+                    }
+
+                    const auto gravity_tau = gravity_model.computeGravityTorques(q_rad);
+                    std::vector<double> model_currents(actuator_count, 0.0);
+                    for (int i = 0; i < actuator_count; ++i) {
+                        model_currents[i] = kinova_teleoperation::torqueToCurrent(
+                          gravity_tau[i], qdot_rad[i], model_by_idx[i]);
+                    }
+
+                    logger.log(base_feedback, model_currents);
                 }
                 
                 timer_count++;
