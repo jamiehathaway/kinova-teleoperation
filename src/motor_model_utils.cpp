@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <iostream>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <kdl/chaindynparam.hpp>
@@ -36,16 +37,26 @@ std::vector<std::string> splitCsvLine(const std::string & line)
 
 std::string resolveMotorModelPath()
 {
-  if (const char * env = std::getenv("KINOVA_TELEOP_MOTOR_MODEL")) {
-    return std::string(env);
+  std::string output{};
+  const auto env = std::getenv("KINOVA_TELEOP_MOTOR_MODEL");
+
+  if (env) {
+    std::cout << "Using env\n";
+    output = env;
+  }
+  else {
+    try {
+      std::cout << "Using ros package dir\n";
+      const auto share_dir = ament_index_cpp::get_package_share_directory("kinova_teleoperation");
+      output = share_dir + "/config/motor_model.csv";
+    } catch (...) {
+      std::cout << "Using last-resort fallback\n";
+      output = "src/kinova_teleoperation/config/motor_model.csv";
+    }
   }
 
-  try {
-    const auto share_dir = ament_index_cpp::get_package_share_directory("kinova_teleoperation");
-    return share_dir + "/config/motor_model.csv";
-  } catch (...) {
-    return "src/kinova_teleoperation/config/motor_model.csv";
-  }
+  std::cout << "Using motor model path: " << output << '\n';
+  return output;
 }
 
 std::vector<JointDriveModel> loadJointModels(const std::string & path)

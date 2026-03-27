@@ -11,11 +11,13 @@ ActuatorCsvLogger::ActuatorCsvLogger(
   const std::string & output_csv,
   int actuator_count,
   int sample_stride,
-  bool include_predicted_currents)
+  bool include_predicted_currents,
+  bool include_model_torques)
 : actuator_count_(actuator_count),
   sample_stride_(sample_stride),
   sample_index_(0),
-  include_predicted_currents_(include_predicted_currents)
+  include_predicted_currents_(include_predicted_currents),
+  include_model_torques_(include_model_torques)
 {
   csv_.open(output_csv.c_str(), std::ios::out | std::ios::trunc);
   if (!csv_.is_open()) {
@@ -41,12 +43,20 @@ bool ActuatorCsvLogger::isOpen() const
 
 void ActuatorCsvLogger::log(const Kinova::Api::BaseCyclic::Feedback & feedback)
 {
-  log(feedback, {});
+  log(feedback, {}, {});
 }
 
 void ActuatorCsvLogger::log(
   const Kinova::Api::BaseCyclic::Feedback & feedback,
   const std::vector<double> & predicted_currents)
+{
+  log(feedback, predicted_currents, {});
+}
+
+void ActuatorCsvLogger::log(
+  const Kinova::Api::BaseCyclic::Feedback & feedback,
+  const std::vector<double> & predicted_currents,
+  const std::vector<double> & model_torques)
 {
   if (!csv_.is_open()) {
     return;
@@ -98,6 +108,15 @@ void ActuatorCsvLogger::log(
     }
   }
 
+  if (include_model_torques_) {
+    for (int i = 0; i < actuator_count_; ++i) {
+      const double value = (i < static_cast<int>(model_torques.size()))
+        ? model_torques[i]
+        : std::numeric_limits<double>::quiet_NaN();
+      csv_ << "," << std::setprecision(12) << value;
+    }
+  }
+
   csv_ << "\n";
 }
 
@@ -119,6 +138,11 @@ void ActuatorCsvLogger::writeHeader()
   if (include_predicted_currents_) {
     for (int i = 0; i < actuator_count_; ++i) {
       csv_ << ",actuator_" << (i + 1) << "_current_model";
+    }
+  }
+  if (include_model_torques_) {
+    for (int i = 0; i < actuator_count_; ++i) {
+      csv_ << ",actuator_" << (i + 1) << "_torque_model";
     }
   }
   csv_ << "\n";

@@ -86,6 +86,7 @@ Plot notes:
 - Blue points: measured current
 - Blue line: fitted current model
 - Red points: model gravity torque
+- Orange points: logged gravity torque (if present in CSV)
 
 Notes:
 - Uses the shared gravity backend from `gravity_model_backend.py`.

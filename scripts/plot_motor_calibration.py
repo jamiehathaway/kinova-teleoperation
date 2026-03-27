@@ -103,6 +103,12 @@ def load_log(path: str) -> List[Dict[str, float]]:
             required.append(f"actuator_{j}_position")
             required.append(f"actuator_{j}_velocity")
             required.append(f"actuator_{j}_current")
+        has_current_model = all(
+            f"actuator_{j}_current_model" in header for j in JOINTS
+        )
+        has_torque_model = all(
+            f"actuator_{j}_torque_model" in header for j in JOINTS
+        )
         try:
             require_columns(header, required, path)
         except ValueError as exc:
@@ -115,6 +121,10 @@ def load_log(path: str) -> List[Dict[str, float]]:
                 parsed[f"pos_{j}"] = float(row[f"actuator_{j}_position"])
                 parsed[f"vel_{j}"] = float(row[f"actuator_{j}_velocity"]) * DEG2RAD
                 parsed[f"current_{j}"] = float(row[f"actuator_{j}_current"])
+                if has_current_model:
+                    parsed[f"current_model_{j}"] = float(row[f"actuator_{j}_current_model"])
+                if has_torque_model:
+                    parsed[f"tau_logged_{j}"] = float(row[f"actuator_{j}_torque_model"])
             rows.append(parsed)
         return rows
 
@@ -133,6 +143,7 @@ def plot_joint(
     x: Sequence[float],
     current: Sequence[float],
     torque: Sequence[float],
+    torque_logged: Sequence[float],
     fit_current: Sequence[float],
     model_lines: List[Tuple[str, Sequence[float]]],
     title: str,
@@ -149,7 +160,16 @@ def plot_joint(
             color_idx = 2 + idx
             color = cmap(color_idx % 10)
             ax.plot(x, series, linewidth=1.2, label=label, color=color)
-    ax_r.scatter(x, torque, s=10, alpha=0.6, color="tab:red", label="gravity torque")
+    ax_r.scatter(x, torque, s=10, alpha=0.6, color="tab:red", label="gravity torque (py)")
+    if torque_logged:
+        ax_r.scatter(
+            x,
+            torque_logged,
+            s=10,
+            alpha=0.6,
+            color="tab:orange",
+            label="gravity torque (logged)",
+        )
     ax.set_title(title)
     ax.set_xlabel("joint position (deg)")
     ax.set_ylabel("current (A)")
@@ -219,6 +239,11 @@ def main() -> int:
         y_current = [row[f"current_{j}"] for row in rows]
         y_tau = [row[f"tau_model_{j}"] for row in rows]
         y_vel = [row[f"vel_{j}"] for row in rows]
+        y_tau_logged = (
+            [row[f"tau_logged_{j}"] for row in rows]
+            if f"tau_logged_{j}" in rows[0]
+            else []
+        )
 
         fit_current: List[float] = []
         if not args.no_fit:
@@ -267,7 +292,14 @@ def main() -> int:
 
         fig, ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
         ax_r = ax.twinx()
-        plot_joint(ax, ax_r, x, y_current, y_tau, fit_current, model_lines, f"Joint {j}")
+        plot_joint(
+            ax, ax_r, x, y_current, y_tau, y_tau_logged, fit_current, model_lines, f"Joint {j}"
+        )
+
+        if rows[0][f"current_model_{j}"]:
+            y_current_model = [row[f"current_model_{j}"] for row in rows]
+            ax.plot(x, y_current_model, color="m", label="Model current (CPP)")
+
         fig.savefig(os.path.join(args.out_dir, f"joint{j}.png"), dpi=150)
         plt.close(fig)
 
@@ -281,6 +313,11 @@ def main() -> int:
         y_current = [row[f"current_{j}"] for row in rows]
         y_tau = [row[f"tau_model_{j}"] for row in rows]
         y_vel = [row[f"vel_{j}"] for row in rows]
+        y_tau_logged = (
+            [row[f"tau_logged_{j}"] for row in rows]
+            if f"tau_logged_{j}" in rows[0]
+            else []
+        )
 
         fit_current: List[float] = []
         if not args.no_fit:
@@ -308,7 +345,13 @@ def main() -> int:
 
         ax = axes[idx]
         ax_r = ax.twinx()
-        plot_joint(ax, ax_r, x, y_current, y_tau, fit_current, model_lines, f"J{j}")
+        plot_joint(
+            ax, ax_r, x, y_current, y_tau, y_tau_logged, fit_current, model_lines, f"J{j}"
+        )
+
+        if rows[0][f"current_model_{j}"]:
+            y_current_model = [row[f"current_model_{j}"] for row in rows]
+            ax.plot(x, y_current_model, color="m", linewidth=2.0)
 
     fig.suptitle(f"Motor calibration: current vs gravity torque ({backend})", fontsize=12)
     fig.savefig(grid_path, dpi=150)

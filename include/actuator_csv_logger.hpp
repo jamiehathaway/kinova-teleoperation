@@ -18,7 +18,8 @@ public:
     const std::string & output_csv,
     int actuator_count,
     int sample_stride,
-    bool include_predicted_currents = false);
+    bool include_predicted_currents = false,
+    bool include_model_torques = false);
 
   bool isOpen() const;
 
@@ -26,6 +27,10 @@ public:
   void log(
     const Kinova::Api::BaseCyclic::Feedback & feedback,
     const std::vector<double> & predicted_currents);
+  void log(
+    const Kinova::Api::BaseCyclic::Feedback & feedback,
+    const std::vector<double> & predicted_currents,
+    const std::vector<double> & model_torques);
 
 private:
   void writeHeader();
@@ -35,6 +40,7 @@ private:
   int sample_stride_;
   int sample_index_;
   bool include_predicted_currents_;
+  bool include_model_torques_;
   std::ofstream csv_;
 };
 

@@ -83,6 +83,7 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
           "/workspaces/kinova-teleoperation/log/motor_calibration_log_j" + std::to_string(actuator_idx + 1) + ".csv",
           actuator_count,
           kLogEveryN,
+          true,
           true);
 
         std::string urdf_path;
@@ -199,7 +200,7 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
                           gravity_tau[i], qdot_rad[i], model_by_idx[i]);
                     }
 
-                    logger.log(base_feedback, model_currents);
+                    logger.log(base_feedback, model_currents, gravity_tau);
                 }
                 
                 timer_count++;
