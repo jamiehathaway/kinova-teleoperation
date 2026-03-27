@@ -9,12 +9,9 @@
 #include <iostream>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
-#include <kdl/chaindynparam.hpp>
-#include <kdl/chain.hpp>
-#include <kdl/jntarray.hpp>
-#include <kdl/tree.hpp>
-#include <kdl_parser/kdl_parser.hpp>
-#include <urdf/model.h>
+#include <Eigen/Dense>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/parsers/urdf.hpp>
 
 namespace kinova_teleoperation
 {
@@ -102,11 +99,12 @@ std::vector<JointDriveModel> loadJointModels(const std::string & path)
 
 struct GravityModel::Impl
 {
-  KDL::Chain chain;
-  KDL::JntArray q;
-  KDL::JntArray gravity_tau;
-  std::unique_ptr<KDL::ChainDynParam> dyn;
+  pinocchio::Model model;
+  pinocchio::Data data;
+  std::vector<pinocchio::JointIndex> joint_ids;
   size_t joint_count;
+
+  Impl() : data(model) {}
 };
 
 GravityModel::GravityModel(
@@ -116,28 +114,20 @@ GravityModel::GravityModel(
   size_t joint_count)
 : impl_(std::make_unique<Impl>())
 {
-  urdf::Model urdf_model;
-  if (!urdf_model.initFile(urdf_path)) {
-    throw std::runtime_error("Failed to parse URDF file: " + urdf_path);
-  }
-
-  KDL::Tree tree;
-  if (!kdl_parser::treeFromUrdfModel(urdf_model, tree)) {
-    throw std::runtime_error("Failed to build KDL tree from URDF: " + urdf_path);
-  }
-
-  if (!tree.getChain(root_link, tip_link, impl_->chain)) {
-    throw std::runtime_error("Failed to extract KDL chain from " + root_link + " to " + tip_link);
-  }
-
-  if (impl_->chain.getNrOfJoints() < joint_count) {
-    throw std::runtime_error("KDL chain has fewer joints than expected");
-  }
-
-  impl_->q = KDL::JntArray(impl_->chain.getNrOfJoints());
-  impl_->gravity_tau = KDL::JntArray(impl_->chain.getNrOfJoints());
-  impl_->dyn = std::make_unique<KDL::ChainDynParam>(impl_->chain, KDL::Vector(0.0, 0.0, -9.81));
+  pinocchio::urdf::buildModel(urdf_path, impl_->model);
+  impl_->data = pinocchio::Data(impl_->model);
   impl_->joint_count = joint_count;
+
+  impl_->joint_ids.clear();
+  impl_->joint_ids.reserve(joint_count);
+  for (size_t i = 0; i < joint_count; ++i) {
+    const std::string name = "joint_" + std::to_string(i + 1);
+    const auto jid = impl_->model.getJointId(name);
+    if (jid == 0) {
+      throw std::runtime_error("Joint not found in URDF: " + name);
+    }
+    impl_->joint_ids.push_back(jid);
+  }
 }
 
 GravityModel::~GravityModel() = default;
@@ -148,17 +138,19 @@ std::vector<double> GravityModel::computeGravityTorques(const std::vector<double
     throw std::runtime_error("Insufficient joint positions provided to gravity solver");
   }
 
-  for (unsigned int i = 0; i < impl_->chain.getNrOfJoints(); ++i) {
-    impl_->q(i) = (i < joint_pos_rad.size()) ? joint_pos_rad[i] : 0.0;
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(impl_->model.nq);
+  for (size_t i = 0; i < impl_->joint_count; ++i) {
+    const auto jid = impl_->joint_ids[i];
+    const int idx = impl_->model.joints[jid].idx_q();
+    q[idx] = joint_pos_rad[i];
   }
 
-  if (impl_->dyn->JntToGravity(impl_->q, impl_->gravity_tau) < 0) {
-    throw std::runtime_error("KDL JntToGravity failed");
-  }
-
+  const auto tau_full = pinocchio::computeGeneralizedGravity(impl_->model, impl_->data, q);
   std::vector<double> tau(impl_->joint_count, 0.0);
   for (size_t i = 0; i < impl_->joint_count; ++i) {
-    tau[i] = impl_->gravity_tau(static_cast<unsigned int>(i));
+    const auto jid = impl_->joint_ids[i];
+    const int idx = impl_->model.joints[jid].idx_v();
+    tau[i] = tau_full[idx];
   }
   return tau;
 }

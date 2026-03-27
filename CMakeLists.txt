@@ -11,6 +11,7 @@ find_package(moveit_ros_planning_interface REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(kdl_parser REQUIRED)
 find_package(urdf REQUIRED)
+find_package(pinocchio REQUIRED)
 
 # Set DURATION variable with default value of 20
 if(NOT DEFINED DURATION)
@@ -50,6 +51,7 @@ add_executable(kinova_torque_control_test
 target_include_directories(kinova_torque_control_test PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_torque_control_test PRIVATE _OS_UNIX DURATION=${DURATION})
 target_link_libraries(kinova_torque_control_test KortexApiCpp pthread)
+target_link_libraries(kinova_torque_control_test pinocchio::pinocchio)
 ament_target_dependencies(kinova_torque_control_test
   ament_index_cpp
   kdl_parser
@@ -78,6 +80,7 @@ add_executable(kinova_motor_calibration
 target_include_directories(kinova_motor_calibration PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_motor_calibration PRIVATE _OS_UNIX)
 target_link_libraries(kinova_motor_calibration KortexApiCpp pthread)
+target_link_libraries(kinova_motor_calibration pinocchio::pinocchio)
 ament_target_dependencies(kinova_motor_calibration
   ament_index_cpp
   kdl_parser
