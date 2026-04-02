@@ -6,6 +6,7 @@ import csv
 import glob
 import math
 import os
+import numpy as np
 from typing import Dict, List, Sequence, Tuple
 
 from gravity_model_backend import build_gravity_model
@@ -117,8 +118,9 @@ def load_log(path: str) -> List[Dict[str, float]]:
         rows: List[Dict[str, float]] = []
         for row in reader:
             parsed: Dict[str, float] = {}
+            parsed["time_s"] = float(row[f"timestamp_ns"]) * 1e-9
             for j in JOINTS:
-                parsed[f"pos_{j}"] = float(row[f"actuator_{j}_position"])
+                parsed[f"pos_{j}"] = float(row[f"actuator_{j}_position"]) * DEG2RAD
                 parsed[f"vel_{j}"] = float(row[f"actuator_{j}_velocity"]) * DEG2RAD
                 parsed[f"current_{j}"] = float(row[f"actuator_{j}_current"])
                 if has_current_model:
@@ -130,11 +132,15 @@ def load_log(path: str) -> List[Dict[str, float]]:
 
 
 def compute_gravity(model, rows: List[Dict[str, float]]) -> None:
-    for row in rows:
-        q = [row[f"pos_{j}"] * DEG2RAD for j in JOINTS]
-        tau = model.compute(q)
+    t = np.array([row["time_s"] for row in rows])
+    q = np.array([[row[f"pos_{j}"] for j in JOINTS] for row in rows])
+    v = np.array([[row[f"vel_{j}"] for j in JOINTS] for row in rows])
+    a = np.gradient(v, t, axis=0, edge_order=2)
+
+    for i in range(len(rows)):
+        tau = model.compute(q[i], v[i], a[i])
         for j, val in zip(JOINTS, tau):
-            row[f"tau_model_{j}"] = val
+            rows[i][f"tau_model_{j}"] = val
 
 
 def plot_joint(
@@ -296,10 +302,11 @@ def main() -> int:
             ax, ax_r, x, y_current, y_tau, y_tau_logged, fit_current, model_lines, f"Joint {j}"
         )
 
-        if rows[0][f"current_model_{j}"]:
-            y_current_model = [row[f"current_model_{j}"] for row in rows]
-            ax.plot(x, y_current_model, color="m", label="Model current (CPP)")
+        # if rows[0][f"current_model_{j}"]:
+        #     y_current_model = [row[f"current_model_{j}"] for row in rows]
+        #     ax.plot(x, y_current_model, color="m", label="Model current (CPP)")
 
+        fig.legend()
         fig.savefig(os.path.join(args.out_dir, f"joint{j}.png"), dpi=150)
         plt.close(fig)
 
@@ -349,9 +356,11 @@ def main() -> int:
             ax, ax_r, x, y_current, y_tau, y_tau_logged, fit_current, model_lines, f"J{j}"
         )
 
-        if rows[0][f"current_model_{j}"]:
-            y_current_model = [row[f"current_model_{j}"] for row in rows]
-            ax.plot(x, y_current_model, color="m", linewidth=2.0)
+        # if rows[0][f"current_model_{j}"]:
+        #     y_current_model = [row[f"current_model_{j}"] for row in rows]
+        #     ax.plot(x, y_current_model, color="m", linewidth=2.0)
+        
+    axes[0].legend()
 
     fig.suptitle(f"Motor calibration: current vs gravity torque ({backend})", fontsize=12)
     fig.savefig(grid_path, dpi=150)
