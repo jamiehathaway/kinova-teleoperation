@@ -1,7 +1,7 @@
 /*
  * Gravity-compensated current control test for Kinova Gen3 Lite.
  *
- * - Uses KDL dynamics from ros2_kortex URDF to compute gravity torques.
+ * - Uses Pinocchio dynamics from ros2_kortex URDF to compute gravity torques.
  * - Converts gravity torque to motor current using joint-specific linear model:
  *     tau ~= current * torque_constant * gear_ratio * gear_efficiency
  * - Commands only the gravity-compensation current; user can backdrive the arm.
@@ -17,8 +17,13 @@
 #include <string>
 #include <vector>
 
+#include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <api_setup.hpp>
 #include "arm_core_functions.hpp"
 #include "actuator_csv_logger.hpp"
@@ -45,11 +50,60 @@ bool button_status(uint32_t flags)
 
 } // namespace
 
-bool lead(Robot & leader)
+class KinovaTeleop : public rclcpp::Node {
+public:
+  KinovaTeleop()
+  : Node("kinova_teleoperation")
+  {
+    m_delta_pose_pub = this->create_publisher<PoseMsg>(
+      "/master/delta_pose", rclcpp::SensorDataQoS());
+  }
+
+  void updateAndPublish(
+    const Eigen::Vector3d& xyz,
+    const Eigen::Quaterniond& quat
+  ) {
+    const auto delta_pose = compute_delta_pose(xyz, quat);
+    m_delta_pose_pub->publish(delta_pose);
+  }
+
+private:
+  using PoseMsg = geometry_msgs::msg::PoseStamped;
+  using WrenchMsg = geometry_msgs::msg::WrenchStamped;
+
+  const PoseMsg& compute_delta_pose(
+      const Eigen::Vector3d& xyz,
+      const Eigen::Quaterniond& quat
+  ) {
+    m_delta_xyz = xyz - m_last_xyz;
+    m_delta_quat = m_last_quat.inverse() * quat;
+
+    delta_pose.header.stamp = this->get_clock()->now();
+    delta_pose.header.frame_id = "world";
+    delta_pose.pose.position.x = m_delta_xyz.x();
+    delta_pose.pose.position.y = m_delta_xyz.y();
+    delta_pose.pose.position.z = m_delta_xyz.z();
+    delta_pose.pose.orientation.w = m_delta_quat.w();
+    delta_pose.pose.orientation.x = m_delta_quat.x();
+    delta_pose.pose.orientation.y = m_delta_quat.y();
+    delta_pose.pose.orientation.z = m_delta_quat.z();
+    return delta_pose;
+  }
+
+  PoseMsg delta_pose{};
+  Eigen::Vector3d m_delta_xyz{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d m_last_xyz{Eigen::Vector3d::Zero()};
+  Eigen::Quaterniond m_delta_quat{Eigen::Quaterniond::Identity()};
+  Eigen::Quaterniond m_last_quat{Eigen::Quaterniond::Identity()};
+  rclcpp::Publisher<PoseMsg>::SharedPtr m_delta_pose_pub;
+  rclcpp::Subscription<WrenchMsg>::SharedPtr m_force_feedback_sub;
+};
+
+bool lead(Robot& leader, KinovaTeleop& node)
 {
-  auto * base_leader = leader.getBaseClient();
-  auto * base_cyclic_leader = leader.getBaseCyclicClient();
-  auto * actuator_config = leader.getActuatorConfig();
+  auto* base_leader = leader.getBaseClient();
+  auto* base_cyclic_leader = leader.getBaseCyclicClient();
+  auto* actuator_config = leader.getActuatorConfig();
 
   bool return_status = true;
 
@@ -106,7 +160,7 @@ bool lead(Robot & leader)
     auto control_mode_message = k_api::ActuatorConfig::ControlModeInformation();
     control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::CURRENT);
 
-    for (const auto & model : joint_models) {
+    for (const auto& model : joint_models) {
       actuator_config->SetControlMode(control_mode_message, model.actuator_id);
     }
 
@@ -124,7 +178,6 @@ bool lead(Robot & leader)
 
         const auto gravity_tau = gravity_model.computeGravityTorques(q_rad);
 
-        // std::cout << "Current: ";
         for (size_t i = 0; i < joint_models.size(); ++i) {
           const auto & model = joint_models[i];
           const int idx = model.actuator_idx;
@@ -136,16 +189,8 @@ bool lead(Robot & leader)
             static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
           const double grav_current = kinova_teleoperation::torqueToCurrent(
             gravity_tau[i], vel_rad_s, model, MAX_ABS_CURRENT_A);
-          // std::cout << grav_current << ", ";
           base_command_leader.mutable_actuators(idx)->set_current_motor(static_cast<float>(grav_current));
         }
-        // std::cout << "\n";
-
-        // std::cout << "Torque: ";
-        // for(const auto& grav_tau : gravity_tau) {
-        //   std::cout << grav_tau << ", ";
-        // }
-        // std::cout << "\n\n";
 
         base_command_leader.set_frame_id(base_command_leader.frame_id() + 1);
         if (base_command_leader.frame_id() > 65535) {
@@ -189,10 +234,10 @@ bool lead(Robot & leader)
 
     std::cout << "Gravity compensation clean exit" << std::endl;
 
-  } catch (k_api::KDetailedException & ex) {
+  } catch (k_api::KDetailedException& ex) {
     std::cout << "API error: " << ex.what() << std::endl;
     return_status = false;
-  } catch (std::runtime_error & ex2) {
+  } catch (std::runtime_error& ex2) {
     std::cout << "Error: " << ex2.what() << std::endl;
     return_status = false;
   }
@@ -205,10 +250,10 @@ bool lead(Robot & leader)
   return return_status;
 }
 
-bool read_buttons_blocking(Robot & robot)
+bool read_buttons_blocking(Robot& robot)
 {
-  auto * base_cyclic = robot.getBaseCyclicClient();
-  auto * base = robot.getBaseClient();
+  auto* base_cyclic = robot.getBaseCyclicClient();
+  auto* base = robot.getBaseClient();
 
   k_api::BaseCyclic::Feedback base_feedback;
   auto servoing_mode = k_api::Base::ServoingModeInformation();
@@ -217,7 +262,7 @@ bool read_buttons_blocking(Robot & robot)
   base->SetServoingMode(servoing_mode);
   base_feedback = base_cyclic->RefreshFeedback();
 
-  while (true) {
+  while (rclcpp::ok()) {
     try {
       base_feedback = base_cyclic->RefreshFeedback();
       const int32_t flags = base_feedback.interconnect().status_flags();
@@ -225,22 +270,24 @@ bool read_buttons_blocking(Robot & robot)
         std::cout << "Pressed on button" << std::endl;
         return true;
       }
-    } catch (const std::exception & ex) {
+    } catch (const std::exception& ex) {
       std::cerr << "Error occurred: " << ex.what() << std::endl;
       return false;
     }
   }
 }
 
-int main(int argc, char const * argv[])
+int main(int argc, char const* argv[])
 {
-  (void)argc;
-  (void)argv;
+  rclcpp::init(argc, argv);
+  KinovaTeleop teleop_node{};
 
   Robot leader("192.168.2.11", "admin", "admin");
   move_to_start_position(leader.getBaseClient());
   read_buttons_blocking(leader);
-  lead(leader);
+  lead(leader, teleop_node);
+
+  rclcpp::shutdown();
 
   return 0;
 }
