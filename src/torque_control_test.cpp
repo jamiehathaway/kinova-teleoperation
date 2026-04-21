@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <geometry_msgs/msg/twist_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -40,6 +41,8 @@ namespace
 
 constexpr double DEG2RAD = M_PI / 180.0;
 constexpr double MAX_ABS_CURRENT_A = 5.0;  // Conservative clamp.
+constexpr int MS_IN_S = 1000;
+constexpr int US_IN_S = 1000000;
 
 bool button_status(uint32_t flags)
 {
@@ -50,6 +53,24 @@ bool button_status(uint32_t flags)
 
 } // namespace
 
+template<typename T>
+Eigen::Quaternion<T> xyz_euler_to_quat(float tx, float ty, float tz) 
+{
+  T sx{sin(0.5*tx)};
+  T cx{cos(0.5*tx)};
+  T sy{sin(0.5*ty)};
+  T cy{cos(0.5*ty)};
+  T sz{sin(0.5*tz)};
+  T cz{cos(0.5*tz)};
+
+  T qx{sx*cy*cz + cx*sy*sz};
+  T qy{-sx*cy*sz + cx*sy*cz};
+  T qz{sx*sy*cz + cx*cy*sz};
+  T qw{-sx*sy*sz + cx*cy*cz};
+
+  return Eigen::Quaternion<T>(qw, qx, qy, qz);
+}
+
 class KinovaTeleop : public rclcpp::Node {
 public:
   KinovaTeleop()
@@ -57,45 +78,71 @@ public:
   {
     m_delta_pose_pub = this->create_publisher<PoseMsg>(
       "/master/delta_pose", rclcpp::SensorDataQoS());
+    m_twist_pub = this->create_publisher<TwistMsg>(
+      "/master/twist", rclcpp::SensorDataQoS());
   }
 
-  void updateAndPublish(
+  void update_and_publish_twist(
+    const double vx, const double vy, const double vz,
+    const double wx, const double wy, const double wz     
+  ) {
+    update_twist(vx, vy, vz, wx, wy, wz);
+    m_twist_pub->publish(m_twist);
+  }
+
+  void update_and_publish_delta_pose(
     const Eigen::Vector3d& xyz,
     const Eigen::Quaterniond& quat
   ) {
-    const auto delta_pose = compute_delta_pose(xyz, quat);
-    m_delta_pose_pub->publish(delta_pose);
+    update_delta_pose(xyz, quat);
+    m_delta_pose_pub->publish(m_delta_pose);
   }
 
 private:
   using PoseMsg = geometry_msgs::msg::PoseStamped;
+  using TwistMsg = geometry_msgs::msg::TwistStamped;
   using WrenchMsg = geometry_msgs::msg::WrenchStamped;
 
-  const PoseMsg& compute_delta_pose(
-      const Eigen::Vector3d& xyz,
-      const Eigen::Quaterniond& quat
+  void update_twist(
+    const double vx, const double vy, const double vz,
+    const double wx, const double wy, const double wz
+  ) {
+    m_twist.header.stamp = this->get_clock()->now();
+    m_twist.header.frame_id = "world";
+    m_twist.twist.linear.x = vx;
+    m_twist.twist.linear.y = vy;
+    m_twist.twist.linear.z = vz;
+    m_twist.twist.angular.x = wx;
+    m_twist.twist.angular.y = wy;
+    m_twist.twist.angular.z = wz;
+  }
+
+  void update_delta_pose(
+    const Eigen::Vector3d& xyz,
+    const Eigen::Quaterniond& quat
   ) {
     m_delta_xyz = xyz - m_last_xyz;
     m_delta_quat = m_last_quat.inverse() * quat;
 
-    delta_pose.header.stamp = this->get_clock()->now();
-    delta_pose.header.frame_id = "world";
-    delta_pose.pose.position.x = m_delta_xyz.x();
-    delta_pose.pose.position.y = m_delta_xyz.y();
-    delta_pose.pose.position.z = m_delta_xyz.z();
-    delta_pose.pose.orientation.w = m_delta_quat.w();
-    delta_pose.pose.orientation.x = m_delta_quat.x();
-    delta_pose.pose.orientation.y = m_delta_quat.y();
-    delta_pose.pose.orientation.z = m_delta_quat.z();
-    return delta_pose;
+    m_delta_pose.header.stamp = this->get_clock()->now();
+    m_delta_pose.header.frame_id = "world";
+    m_delta_pose.pose.position.x = m_delta_xyz.x();
+    m_delta_pose.pose.position.y = m_delta_xyz.y();
+    m_delta_pose.pose.position.z = m_delta_xyz.z();
+    m_delta_pose.pose.orientation.w = m_delta_quat.w();
+    m_delta_pose.pose.orientation.x = m_delta_quat.x();
+    m_delta_pose.pose.orientation.y = m_delta_quat.y();
+    m_delta_pose.pose.orientation.z = m_delta_quat.z();
   }
 
-  PoseMsg delta_pose{};
   Eigen::Vector3d m_delta_xyz{Eigen::Vector3d::Zero()};
   Eigen::Vector3d m_last_xyz{Eigen::Vector3d::Zero()};
   Eigen::Quaterniond m_delta_quat{Eigen::Quaterniond::Identity()};
   Eigen::Quaterniond m_last_quat{Eigen::Quaterniond::Identity()};
+  PoseMsg m_delta_pose{};
+  TwistMsg m_twist{};
   rclcpp::Publisher<PoseMsg>::SharedPtr m_delta_pose_pub;
+  rclcpp::Publisher<TwistMsg>::SharedPtr m_twist_pub;
   rclcpp::Subscription<WrenchMsg>::SharedPtr m_force_feedback_sub;
 };
 
@@ -136,7 +183,7 @@ bool lead(Robot& leader, KinovaTeleop& node)
   try {
     const auto share_dir = ament_index_cpp::get_package_share_directory("kortex_description");
     urdf_path = share_dir + "/robots/gen3_lite.urdf";
-  } catch (const std::exception & ex) {
+  } catch (const std::exception& ex) {
     std::cerr << "Unable to locate kortex_description package: " << ex.what() << std::endl;
     return false;
   }
@@ -145,7 +192,7 @@ bool lead(Robot& leader, KinovaTeleop& node)
   std::vector<kinova_teleoperation::JointDriveModel> joint_models;
   try {
     joint_models = kinova_teleoperation::loadJointModels(motor_model_path);
-  } catch (const std::exception & ex) {
+  } catch (const std::exception& ex) {
     std::cerr << "Unable to load motor model: " << ex.what() << std::endl;
     return false;
   }
@@ -166,10 +213,10 @@ bool lead(Robot& leader, KinovaTeleop& node)
 
     std::cout << "Running gravity compensation mode for " << DURATION << " seconds" << std::endl;
 
-    while ((GetTickUs() - start_time) < (DURATION * 1000000)) {
+    while ((GetTickUs() - start_time) < (DURATION * US_IN_S)) {
       now = GetTickUs();
 
-      if (now - last > 1000) {
+      if (now - last > MS_IN_S) {
         std::vector<double> q_rad(joint_models.size(), 0.0);
         for (size_t i = 0; i < joint_models.size(); ++i) {
           const int idx = joint_models[i].actuator_idx;
@@ -179,7 +226,7 @@ bool lead(Robot& leader, KinovaTeleop& node)
         const auto gravity_tau = gravity_model.computeGravityTorques(q_rad);
 
         for (size_t i = 0; i < joint_models.size(); ++i) {
-          const auto & model = joint_models[i];
+          const auto& model = joint_models[i];
           const int idx = model.actuator_idx;
 
           // Keep position command at measured value to avoid following errors.
@@ -205,13 +252,13 @@ bool lead(Robot& leader, KinovaTeleop& node)
         try {
           base_feedback_leader = base_cyclic_leader->Refresh(base_command_leader, 0);
           refreshed = true;
-        } catch (k_api::KDetailedException & ex) {
+        } catch (k_api::KDetailedException& ex) {
           std::cout << "Kortex exception: " << ex.what() << std::endl;
           std::cout << "Error sub-code: "
                     << k_api::SubErrorCodes_Name(k_api::SubErrorCodes(
                          ex.getErrorInfo().getError().error_sub_code()))
                     << std::endl;
-        } catch (std::runtime_error & ex2) {
+        } catch (std::runtime_error& ex2) {
           std::cout << "runtime error: " << ex2.what() << std::endl;
         } catch (...) {
           std::cout << "Unknown error." << std::endl;
@@ -219,6 +266,15 @@ bool lead(Robot& leader, KinovaTeleop& node)
 
         if (refreshed) {
           logger.log(base_feedback_leader);
+
+          node.update_and_publish_twist(
+            base_feedback_leader.base().tool_twist_linear_x(),
+            base_feedback_leader.base().tool_twist_linear_y(),
+            base_feedback_leader.base().tool_twist_linear_z(),
+            base_feedback_leader.base().tool_twist_angular_x(),
+            base_feedback_leader.base().tool_twist_angular_y(),
+            base_feedback_leader.base().tool_twist_angular_z()
+          );
         }
 
         last = GetTickUs();
@@ -228,7 +284,7 @@ bool lead(Robot& leader, KinovaTeleop& node)
     std::cout << "Gravity compensation test completed" << std::endl;
 
     control_mode_message.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
-    for (const auto & model : joint_models) {
+    for (const auto& model : joint_models) {
       actuator_config->SetControlMode(control_mode_message, model.actuator_id);
     }
 
@@ -275,6 +331,7 @@ bool read_buttons_blocking(Robot& robot)
       return false;
     }
   }
+  return false;
 }
 
 int main(int argc, char const* argv[])
@@ -284,10 +341,10 @@ int main(int argc, char const* argv[])
 
   Robot leader("192.168.2.11", "admin", "admin");
   move_to_start_position(leader.getBaseClient());
-  read_buttons_blocking(leader);
-  lead(leader, teleop_node);
+  if(read_buttons_blocking(leader)) {
+    lead(leader, teleop_node);
+  };
 
   rclcpp::shutdown();
-
   return 0;
 }

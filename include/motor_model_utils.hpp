@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <Eigen/Core>
 
 namespace kinova_teleoperation
 {
@@ -26,13 +27,17 @@ class GravityModel
 {
 public:
   GravityModel(
-    const std::string & urdf_path,
-    const std::string & root_link,
-    const std::string & tip_link,
+    const std::string& urdf_path,
+    const std::string& root_link,
+    const std::string& tip_link,
     size_t joint_count);
   ~GravityModel();
 
-  std::vector<double> computeGravityTorques(const std::vector<double> & joint_pos_rad);
+  std::vector<double> computeGravityTorques(const std::vector<double>& joint_pos_rad);
+  Eigen::Vector<double, 6> computeEndEffectorTwist(
+    const Eigen::VectorXd& joint_pos_rad,
+    const Eigen::VectorXd& joint_vel_rad
+  );
 
 private:
   struct Impl;
@@ -44,7 +49,7 @@ private:
 double torqueToCurrent(
   double torque_nm,
   double qdot_rad_s,
-  const JointDriveModel & model,
+  const JointDriveModel& model,
   double clamp_amp = 0.0);
 
 }  // namespace kinova_teleoperation

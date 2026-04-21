@@ -11,6 +11,7 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <Eigen/Dense>
 #include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
 namespace kinova_teleoperation
@@ -103,14 +104,16 @@ struct GravityModel::Impl
   pinocchio::Data data;
   std::vector<pinocchio::JointIndex> joint_ids;
   size_t joint_count;
+  std::string endeffector_id;
+  Eigen::Matrix<double, 6, -1> jacobian;
 
   Impl() : data(model) {}
 };
 
 GravityModel::GravityModel(
-  const std::string & urdf_path,
-  const std::string & root_link,
-  const std::string & tip_link,
+  const std::string& urdf_path,
+  const std::string& root_link,
+  const std::string& tip_link,
   size_t joint_count)
 : impl_(std::make_unique<Impl>())
 {
@@ -128,11 +131,17 @@ GravityModel::GravityModel(
     }
     impl_->joint_ids.push_back(jid);
   }
+
+  impl_->jacobian = impl_->jacobian.Zero(impl_->jacobian.rows(), impl_->model.nq);
+  if(!impl_->model.existFrame(tip_link)) {
+    std::cout << "Warning: frame \"" << tip_link << "\" not found in robot model\n";
+  }
+  impl_->endeffector_id = impl_->model.getFrameId(tip_link);
 }
 
 GravityModel::~GravityModel() = default;
 
-std::vector<double> GravityModel::computeGravityTorques(const std::vector<double> & joint_pos_rad)
+std::vector<double> GravityModel::computeGravityTorques(const std::vector<double>& joint_pos_rad)
 {
   if (joint_pos_rad.size() < impl_->joint_count) {
     throw std::runtime_error("Insufficient joint positions provided to gravity solver");
@@ -153,6 +162,21 @@ std::vector<double> GravityModel::computeGravityTorques(const std::vector<double
     tau[i] = tau_full[idx];
   }
   return tau;
+}
+
+Eigen::Vector<double, 6> GravityModel::computeEndEffectorTwist(const Eigen::VectorXd& joint_pos_rad, const Eigen::VectorXd& joint_vel_rad)
+{
+  pinocchio::forwardKinematics(impl_->model, impl_->data, joint_pos_rad, joint_vel_rad);
+  impl_->jacobian.setZero();
+  pinocchio::computeFrameJacobian(
+    impl_->model,
+    impl_->data,
+    joint_pos_rad,
+    impl_->endeffector_id,
+    pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED,
+    impl_->jacobian);
+
+  return impl_->jacobian * joint_vel_rad;
 }
 
 double torqueToCurrent(
