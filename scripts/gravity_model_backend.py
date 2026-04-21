@@ -1,10 +1,15 @@
 """Shared gravity model backend (KDL with Pinocchio fallback)."""
 
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 
 class GravityModelBase:
-    def compute(self, q_rad: Sequence[float]) -> List[float]:
+    def compute(
+        self,
+        q_rad: Sequence[float],
+        v_rad_s: Optional[Sequence[float]] = None,
+        a_rad_s2: Optional[Sequence[float]] = None,
+    ) -> List[float]:
         raise NotImplementedError
 
 
@@ -33,7 +38,14 @@ class GravityModelKDL(GravityModelBase):
         self._dyn = kdl.ChainDynParam(chain, kdl.Vector(0.0, 0.0, -9.81))
         self._joint_count = joint_count
 
-    def compute(self, q_rad: Sequence[float]) -> List[float]:
+    def compute(
+        self,
+        q_rad: Sequence[float],
+        v_rad_s: Optional[Sequence[float]] = None,
+        a_rad_s2: Optional[Sequence[float]] = None,
+    ) -> List[float]:
+        if v_rad_s is not None or a_rad_s2 is not None:
+            raise RuntimeError("KDL backend supports gravity only (v/a must be None).")
         if len(q_rad) < self._joint_count:
             raise RuntimeError("Insufficient joint positions provided to gravity solver")
         for i in range(self._chain.getNrOfJoints()):
@@ -57,15 +69,28 @@ class GravityModelPinocchio(GravityModelBase):
         self._data = self._model.createData()
         self._joint_names = list(joint_names)
 
-    def compute(self, q_rad: Sequence[float]) -> List[float]:
+    def compute(
+        self,
+        q_rad: Sequence[float],
+        v_rad_s: Optional[Sequence[float]] = None,
+        a_rad_s2: Optional[Sequence[float]] = None,
+    ) -> List[float]:
         q = self._np.zeros(self._model.nq)
+        v = self._np.zeros(self._model.nv)
+        a = self._np.zeros(self._model.nv)
         for idx, name in enumerate(self._joint_names):
             jid = self._model.getJointId(name)
             if jid == 0:
                 raise RuntimeError(f"Joint '{name}' not found in URDF model.")
             q_idx = self._model.joints[jid].idx_q
+            v_idx = self._model.joints[jid].idx_v
             q[q_idx] = q_rad[idx]
-        tau = self._pin.computeGeneralizedGravity(self._model, self._data, q)
+            if v_rad_s is not None:
+                v[v_idx] = v_rad_s[idx]
+            if a_rad_s2 is not None:
+                a[v_idx] = a_rad_s2[idx]
+
+        tau = self._pin.rnea(self._model, self._data, q, v, a)
         out: List[float] = []
         for name in self._joint_names:
             jid = self._model.getJointId(name)
