@@ -34,9 +34,9 @@ public:
   ~GravityModel();
 
   std::vector<double> computeGravityTorques(const std::vector<double>& joint_pos_rad);
-  Eigen::Vector<double, 6> computeEndEffectorTwist(
-    const Eigen::VectorXd& joint_pos_rad,
-    const Eigen::VectorXd& joint_vel_rad
+  Eigen::Matrix<double, 6, 1> computeEndEffectorTwist(
+    const std::vector<double>& joint_pos_rad,
+    const std::vector<double>& joint_vel_rad
   );
 
 private:

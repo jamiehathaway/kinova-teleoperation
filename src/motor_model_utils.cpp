@@ -10,6 +10,7 @@
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <Eigen/Dense>
+#include <pinocchio/algorithm/jacobian.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/parsers/urdf.hpp>
@@ -104,8 +105,8 @@ struct GravityModel::Impl
   pinocchio::Data data;
   std::vector<pinocchio::JointIndex> joint_ids;
   size_t joint_count;
-  std::string endeffector_id;
-  Eigen::Matrix<double, 6, -1> jacobian;
+  pinocchio::FrameIndex endeffector_id;
+  Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian;
 
   Impl() : data(model) {}
 };
@@ -121,6 +122,13 @@ GravityModel::GravityModel(
   impl_->data = pinocchio::Data(impl_->model);
   impl_->joint_count = joint_count;
 
+  if (!impl_->model.existFrame(root_link)) {
+    throw std::runtime_error("Root frame not found in URDF: " + root_link);
+  }
+  if (!impl_->model.existFrame(tip_link)) {
+    throw std::runtime_error("Tip frame not found in URDF: " + tip_link);
+  }
+
   impl_->joint_ids.clear();
   impl_->joint_ids.reserve(joint_count);
   for (size_t i = 0; i < joint_count; ++i) {
@@ -132,10 +140,7 @@ GravityModel::GravityModel(
     impl_->joint_ids.push_back(jid);
   }
 
-  impl_->jacobian = impl_->jacobian.Zero(impl_->jacobian.rows(), impl_->model.nq);
-  if(!impl_->model.existFrame(tip_link)) {
-    std::cout << "Warning: frame \"" << tip_link << "\" not found in robot model\n";
-  }
+  impl_->jacobian = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, impl_->model.nv);
   impl_->endeffector_id = impl_->model.getFrameId(tip_link);
 }
 
@@ -164,19 +169,32 @@ std::vector<double> GravityModel::computeGravityTorques(const std::vector<double
   return tau;
 }
 
-Eigen::Vector<double, 6> GravityModel::computeEndEffectorTwist(const Eigen::VectorXd& joint_pos_rad, const Eigen::VectorXd& joint_vel_rad)
+Eigen::Matrix<double, 6, 1> GravityModel::computeEndEffectorTwist(
+  const std::vector<double>& joint_pos_rad,
+  const std::vector<double>& joint_vel_rad)
 {
-  pinocchio::forwardKinematics(impl_->model, impl_->data, joint_pos_rad, joint_vel_rad);
+  if (joint_pos_rad.size() < impl_->joint_count || joint_vel_rad.size() < impl_->joint_count) {
+    throw std::runtime_error("Insufficient joint state provided to end-effector twist solver");
+  }
+
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(impl_->model.nq);
+  Eigen::VectorXd v = Eigen::VectorXd::Zero(impl_->model.nv);
+  for (size_t i = 0; i < impl_->joint_count; ++i) {
+    const auto jid = impl_->joint_ids[i];
+    q[impl_->model.joints[jid].idx_q()] = joint_pos_rad[i];
+    v[impl_->model.joints[jid].idx_v()] = joint_vel_rad[i];
+  }
+
   impl_->jacobian.setZero();
   pinocchio::computeFrameJacobian(
     impl_->model,
     impl_->data,
-    joint_pos_rad,
+    q,
     impl_->endeffector_id,
     pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED,
     impl_->jacobian);
 
-  return impl_->jacobian * joint_vel_rad;
+  return impl_->jacobian * v;
 }
 
 double torqueToCurrent(

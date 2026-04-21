@@ -213,14 +213,16 @@ bool lead(Robot& leader, KinovaTeleop& node)
 
     std::cout << "Running gravity compensation mode for " << DURATION << " seconds" << std::endl;
 
-    while ((GetTickUs() - start_time) < (DURATION * US_IN_S)) {
+    while (rclcpp::ok()) {
       now = GetTickUs();
 
       if (now - last > MS_IN_S) {
         std::vector<double> q_rad(joint_models.size(), 0.0);
+        std::vector<double> qdot_rad_s(joint_models.size(), 0.0);
         for (size_t i = 0; i < joint_models.size(); ++i) {
           const int idx = joint_models[i].actuator_idx;
           q_rad[i] = static_cast<double>(base_feedback_leader.actuators(idx).position()) * DEG2RAD;
+          qdot_rad_s[i] = static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
         }
 
         const auto gravity_tau = gravity_model.computeGravityTorques(q_rad);
@@ -232,10 +234,8 @@ bool lead(Robot& leader, KinovaTeleop& node)
           // Keep position command at measured value to avoid following errors.
           base_command_leader.mutable_actuators(idx)->set_position(base_feedback_leader.actuators(idx).position());
 
-          const double vel_rad_s =
-            static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
           const double grav_current = kinova_teleoperation::torqueToCurrent(
-            gravity_tau[i], vel_rad_s, model, MAX_ABS_CURRENT_A);
+            gravity_tau[i], qdot_rad_s[i], model, MAX_ABS_CURRENT_A);
           base_command_leader.mutable_actuators(idx)->set_current_motor(static_cast<float>(grav_current));
         }
 
@@ -267,13 +267,24 @@ bool lead(Robot& leader, KinovaTeleop& node)
         if (refreshed) {
           logger.log(base_feedback_leader);
 
+          std::vector<double> q_rad_refreshed(joint_models.size(), 0.0);
+          std::vector<double> qdot_rad_s_refreshed(joint_models.size(), 0.0);
+          for (size_t i = 0; i < joint_models.size(); ++i) {
+            const int idx = joint_models[i].actuator_idx;
+            q_rad_refreshed[i] = static_cast<double>(base_feedback_leader.actuators(idx).position()) * DEG2RAD;
+            qdot_rad_s_refreshed[i] = static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
+          }
+
+          const Eigen::Matrix<double, 6, 1> ee_twist =
+            gravity_model.computeEndEffectorTwist(q_rad_refreshed, qdot_rad_s_refreshed);
+
           node.update_and_publish_twist(
-            base_feedback_leader.base().tool_twist_linear_x(),
-            base_feedback_leader.base().tool_twist_linear_y(),
-            base_feedback_leader.base().tool_twist_linear_z(),
-            base_feedback_leader.base().tool_twist_angular_x(),
-            base_feedback_leader.base().tool_twist_angular_y(),
-            base_feedback_leader.base().tool_twist_angular_z()
+            ee_twist(0),
+            ee_twist(1),
+            ee_twist(2),
+            ee_twist(3),
+            ee_twist(4),
+            ee_twist(5)
           );
         }
 
