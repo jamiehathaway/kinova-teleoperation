@@ -99,11 +99,48 @@ std::vector<JointDriveModel> loadJointModels(const std::string & path)
   return models;
 }
 
+std::vector<JointDriveModel> orderJointModelsByActuatorIndex(
+  const std::vector<JointDriveModel> & models)
+{
+  if (models.empty()) {
+    throw std::runtime_error("Motor model list is empty");
+  }
+
+  int max_index = -1;
+  for (const auto & model : models) {
+    if (model.actuator_idx < 0) {
+      throw std::runtime_error("Motor model contains a negative actuator index");
+    }
+    max_index = std::max(max_index, model.actuator_idx);
+  }
+
+  std::vector<JointDriveModel> ordered(static_cast<size_t>(max_index + 1));
+  std::vector<bool> seen(static_cast<size_t>(max_index + 1), false);
+  for (const auto & model : models) {
+    const size_t idx = static_cast<size_t>(model.actuator_idx);
+    if (seen[idx]) {
+      throw std::runtime_error(
+        "Duplicate actuator index in motor model: " + std::to_string(model.actuator_idx));
+    }
+    ordered[idx] = model;
+    seen[idx] = true;
+  }
+
+  for (size_t i = 0; i < seen.size(); ++i) {
+    if (!seen[i]) {
+      throw std::runtime_error("Missing actuator index in motor model: " + std::to_string(i));
+    }
+  }
+
+  return ordered;
+}
+
 struct GravityModel::Impl
 {
   pinocchio::Model model;
   pinocchio::Data data;
   std::vector<pinocchio::JointIndex> joint_ids;
+  std::vector<JointPositionLimit> joint_limits;
   size_t joint_count;
   pinocchio::FrameIndex endeffector_id;
   Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian;
@@ -131,6 +168,7 @@ GravityModel::GravityModel(
 
   impl_->joint_ids.clear();
   impl_->joint_ids.reserve(joint_count);
+  impl_->joint_limits.reserve(joint_count);
   for (size_t i = 0; i < joint_count; ++i) {
     const std::string name = "joint_" + std::to_string(i + 1);
     const auto jid = impl_->model.getJointId(name);
@@ -138,6 +176,12 @@ GravityModel::GravityModel(
       throw std::runtime_error("Joint not found in URDF: " + name);
     }
     impl_->joint_ids.push_back(jid);
+
+    const auto q_idx = impl_->model.joints[jid].idx_q();
+    impl_->joint_limits.push_back(JointPositionLimit{
+      impl_->model.lowerPositionLimit[q_idx],
+      impl_->model.upperPositionLimit[q_idx]
+    });
   }
 
   impl_->jacobian = Eigen::Matrix<double, 6, Eigen::Dynamic>::Zero(6, impl_->model.nv);
@@ -169,6 +213,71 @@ std::vector<double> GravityModel::computeGravityTorques(const std::vector<double
   return tau;
 }
 
+std::vector<double> GravityModel::computeJointLimitRepulsionTorques(
+  const std::vector<double>& joint_pos_rad,
+  double margin_rad,
+  double gain_nm)
+{
+  if (joint_pos_rad.size() < impl_->joint_count) {
+    throw std::runtime_error("Insufficient joint positions provided to joint-limit repulsion solver");
+  }
+  if (margin_rad <= 0.0 || gain_nm <= 0.0) {
+    return std::vector<double>(impl_->joint_count, 0.0);
+  }
+
+  std::vector<double> tau(impl_->joint_count, 0.0);
+  for (size_t i = 0; i < impl_->joint_count; ++i) {
+    const auto & limit = impl_->joint_limits[i];
+    const double q = joint_pos_rad[i];
+
+    const double lower_dist = q - limit.lower;
+    if (lower_dist < margin_rad) {
+      const double normalized = std::max(0.0, std::min(1.0, (margin_rad - lower_dist) / margin_rad));
+      tau[i] += gain_nm * normalized * normalized;
+    }
+
+    const double upper_dist = limit.upper - q;
+    if (upper_dist < margin_rad) {
+      const double normalized = std::max(0.0, std::min(1.0, (margin_rad - upper_dist) / margin_rad));
+      tau[i] -= gain_nm * normalized * normalized;
+    }
+  }
+
+  return tau;
+}
+
+std::vector<double> GravityModel::computeEndEffectorWrenchTorques(
+  const std::vector<double>& joint_pos_rad,
+  const Eigen::Matrix<double, 6, 1>& wrench)
+{
+  if (joint_pos_rad.size() < impl_->joint_count) {
+    throw std::runtime_error("Insufficient joint positions provided to wrench solver");
+  }
+
+  Eigen::VectorXd q = Eigen::VectorXd::Zero(impl_->model.nq);
+  for (size_t i = 0; i < impl_->joint_count; ++i) {
+    const auto jid = impl_->joint_ids[i];
+    q[impl_->model.joints[jid].idx_q()] = joint_pos_rad[i];
+  }
+
+  impl_->jacobian.setZero();
+  pinocchio::computeFrameJacobian(
+    impl_->model,
+    impl_->data,
+    q,
+    impl_->endeffector_id,
+    pinocchio::ReferenceFrame::LOCAL_WORLD_ALIGNED,
+    impl_->jacobian);
+
+  const Eigen::VectorXd tau_full = impl_->jacobian.transpose() * wrench;
+  std::vector<double> tau(impl_->joint_count, 0.0);
+  for (size_t i = 0; i < impl_->joint_count; ++i) {
+    const auto jid = impl_->joint_ids[i];
+    tau[i] = tau_full[impl_->model.joints[jid].idx_v()];
+  }
+  return tau;
+}
+
 Eigen::Matrix<double, 6, 1> GravityModel::computeEndEffectorTwist(
   const std::vector<double>& joint_pos_rad,
   const std::vector<double>& joint_vel_rad)
@@ -195,6 +304,11 @@ Eigen::Matrix<double, 6, 1> GravityModel::computeEndEffectorTwist(
     impl_->jacobian);
 
   return impl_->jacobian * v;
+}
+
+std::vector<JointPositionLimit> GravityModel::jointPositionLimits() const
+{
+  return impl_->joint_limits;
 }
 
 double torqueToCurrent(

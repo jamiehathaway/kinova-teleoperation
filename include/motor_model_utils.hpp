@@ -20,8 +20,16 @@ struct JointDriveModel
   double viscous_damping;
 };
 
+struct JointPositionLimit
+{
+  double lower;
+  double upper;
+};
+
 std::string resolveMotorModelPath();
 std::vector<JointDriveModel> loadJointModels(const std::string & path);
+std::vector<JointDriveModel> orderJointModelsByActuatorIndex(
+  const std::vector<JointDriveModel> & models);
 
 class GravityModel
 {
@@ -34,10 +42,18 @@ public:
   ~GravityModel();
 
   std::vector<double> computeGravityTorques(const std::vector<double>& joint_pos_rad);
+  std::vector<double> computeJointLimitRepulsionTorques(
+    const std::vector<double>& joint_pos_rad,
+    double margin_rad,
+    double gain_nm);
+  std::vector<double> computeEndEffectorWrenchTorques(
+    const std::vector<double>& joint_pos_rad,
+    const Eigen::Matrix<double, 6, 1>& wrench);
   Eigen::Matrix<double, 6, 1> computeEndEffectorTwist(
     const std::vector<double>& joint_pos_rad,
     const std::vector<double>& joint_vel_rad
   );
+  std::vector<JointPositionLimit> jointPositionLimits() const;
 
 private:
   struct Impl;

@@ -2,9 +2,11 @@
  * Gravity-compensated current control test for Kinova Gen3 Lite.
  *
  * - Uses Pinocchio dynamics from ros2_kortex URDF to compute gravity torques.
+ * - Adds a joint-limit repulsive term derived from the same URDF-backed model.
+ * - Optionally reproduces /master/force_feedback Wrenches at the end-effector.
  * - Converts gravity torque to motor current using joint-specific linear model:
  *     tau ~= current * torque_constant * gear_ratio * gear_efficiency
- * - Commands only the gravity-compensation current; user can backdrive the arm.
+ * - Commands the summed torque/current compensation while preserving the low-level loop.
  *
  * IMPORTANT: Safety-critical. This file should be validated on hardware by operator only.
  */
@@ -13,11 +15,15 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/wrench_stamped.hpp>
@@ -76,10 +82,26 @@ public:
   KinovaTeleop()
   : Node("kinova_teleoperation")
   {
+    force_feedback_topic_ = this->declare_parameter<std::string>(
+      "force_feedback_topic", "/master/force_feedback");
+    force_feedback_enabled_ = this->declare_parameter<bool>(
+      "enable_force_feedback", false);
+    force_feedback_timeout_sec_ = this->declare_parameter<double>(
+      "force_feedback_timeout_sec", 0.2);
+    joint_limit_margin_rad_ = this->declare_parameter<double>(
+      "joint_limit_repulsion_margin_rad", 0.25);
+    joint_limit_gain_nm_ = this->declare_parameter<double>(
+      "joint_limit_repulsion_gain_nm", 2.0);
+
     m_delta_pose_pub = this->create_publisher<PoseMsg>(
       "/master/delta_pose", rclcpp::SensorDataQoS());
     m_twist_pub = this->create_publisher<TwistMsg>(
       "/master/twist", rclcpp::SensorDataQoS());
+    m_force_feedback_sub = this->create_subscription<WrenchMsg>(
+      force_feedback_topic_, rclcpp::SensorDataQoS(),
+      [this](const WrenchMsg::SharedPtr msg) {
+        this->force_feedback_callback(*msg);
+      });
   }
 
   void update_and_publish_twist(
@@ -98,10 +120,54 @@ public:
     m_delta_pose_pub->publish(m_delta_pose);
   }
 
+  Eigen::Matrix<double, 6, 1> latest_force_feedback_wrench() const
+  {
+    Eigen::Matrix<double, 6, 1> wrench = Eigen::Matrix<double, 6, 1>::Zero();
+    if (!force_feedback_enabled_) {
+      return wrench;
+    }
+
+    std::lock_guard<std::mutex> lock(force_feedback_mutex_);
+    if (!have_force_feedback_) {
+      return wrench;
+    }
+
+    const double age_sec = (this->get_clock()->now() - latest_force_feedback_stamp_).seconds();
+    if (age_sec > force_feedback_timeout_sec_) {
+      return wrench;
+    }
+
+    wrench << latest_force_feedback_.wrench.force.x,
+      latest_force_feedback_.wrench.force.y,
+      latest_force_feedback_.wrench.force.z,
+      latest_force_feedback_.wrench.torque.x,
+      latest_force_feedback_.wrench.torque.y,
+      latest_force_feedback_.wrench.torque.z;
+    return wrench;
+  }
+
+  double joint_limit_margin_rad() const
+  {
+    return joint_limit_margin_rad_;
+  }
+
+  double joint_limit_gain_nm() const
+  {
+    return joint_limit_gain_nm_;
+  }
+
 private:
   using PoseMsg = geometry_msgs::msg::PoseStamped;
   using TwistMsg = geometry_msgs::msg::TwistStamped;
   using WrenchMsg = geometry_msgs::msg::WrenchStamped;
+
+  void force_feedback_callback(const WrenchMsg & msg)
+  {
+    std::lock_guard<std::mutex> lock(force_feedback_mutex_);
+    latest_force_feedback_ = msg;
+    latest_force_feedback_stamp_ = this->get_clock()->now();
+    have_force_feedback_ = true;
+  }
 
   void update_twist(
     const double vx, const double vy, const double vz,
@@ -144,22 +210,35 @@ private:
   rclcpp::Publisher<PoseMsg>::SharedPtr m_delta_pose_pub;
   rclcpp::Publisher<TwistMsg>::SharedPtr m_twist_pub;
   rclcpp::Subscription<WrenchMsg>::SharedPtr m_force_feedback_sub;
+  mutable std::mutex force_feedback_mutex_;
+  WrenchMsg latest_force_feedback_{};
+  rclcpp::Time latest_force_feedback_stamp_{};
+  bool have_force_feedback_{false};
+  bool force_feedback_enabled_{false};
+  double force_feedback_timeout_sec_{0.0};
+  double joint_limit_margin_rad_{0.0};
+  double joint_limit_gain_nm_{0.0};
+  std::string force_feedback_topic_;
 };
 
-bool lead(Robot& leader, KinovaTeleop& node)
+bool lead(Robot& leader, const std::shared_ptr<KinovaTeleop>& node)
 {
   auto* base_leader = leader.getBaseClient();
   auto* base_cyclic_leader = leader.getBaseCyclicClient();
   auto* actuator_config = leader.getActuatorConfig();
 
   bool return_status = true;
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
 
   const unsigned int actuator_count = base_leader->GetActuatorCount().count();
   constexpr int kLogEveryN = 10;  // 1 kHz loop -> 100 Hz logging to avoid heavy IO.
   kinova_teleoperation::ActuatorCsvLogger logger(
     "/workspaces/kinova-teleoperation/log/torque_control_log.csv",
     static_cast<int>(actuator_count),
-    kLogEveryN);
+    kLogEveryN,
+    true,
+    true);
 
   try {
     base_leader->ClearFaults();
@@ -191,9 +270,15 @@ bool lead(Robot& leader, KinovaTeleop& node)
   const std::string motor_model_path = kinova_teleoperation::resolveMotorModelPath();
   std::vector<kinova_teleoperation::JointDriveModel> joint_models;
   try {
-    joint_models = kinova_teleoperation::loadJointModels(motor_model_path);
+    joint_models = kinova_teleoperation::orderJointModelsByActuatorIndex(
+      kinova_teleoperation::loadJointModels(motor_model_path));
   } catch (const std::exception& ex) {
     std::cerr << "Unable to load motor model: " << ex.what() << std::endl;
+    return false;
+  }
+
+  if (joint_models.size() != static_cast<size_t>(actuator_count)) {
+    std::cerr << "Motor model size does not match actuator count." << std::endl;
     return false;
   }
 
@@ -213,30 +298,50 @@ bool lead(Robot& leader, KinovaTeleop& node)
 
     std::cout << "Running gravity compensation mode for " << DURATION << " seconds" << std::endl;
 
+    std::vector<double> q_rad(joint_models.size(), 0.0);
+    std::vector<double> qdot_rad_s(joint_models.size(), 0.0);
+    std::vector<double> gravity_tau(joint_models.size(), 0.0);
+    std::vector<double> limit_tau(joint_models.size(), 0.0);
+    std::vector<double> wrench_tau(joint_models.size(), 0.0);
+    std::vector<double> total_tau(joint_models.size(), 0.0);
+    std::vector<double> logged_currents(actuator_count, std::numeric_limits<double>::quiet_NaN());
+    std::vector<double> logged_torques(actuator_count, std::numeric_limits<double>::quiet_NaN());
+
     while (rclcpp::ok()) {
+      executor.spin_some();
       now = GetTickUs();
 
       if (now - last > MS_IN_S) {
-        std::vector<double> q_rad(joint_models.size(), 0.0);
-        std::vector<double> qdot_rad_s(joint_models.size(), 0.0);
+        std::fill(q_rad.begin(), q_rad.end(), 0.0);
+        std::fill(qdot_rad_s.begin(), qdot_rad_s.end(), 0.0);
         for (size_t i = 0; i < joint_models.size(); ++i) {
           const int idx = joint_models[i].actuator_idx;
           q_rad[i] = static_cast<double>(base_feedback_leader.actuators(idx).position()) * DEG2RAD;
           qdot_rad_s[i] = static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
         }
 
-        const auto gravity_tau = gravity_model.computeGravityTorques(q_rad);
+        gravity_tau = gravity_model.computeGravityTorques(q_rad);
+        limit_tau = gravity_model.computeJointLimitRepulsionTorques(
+          q_rad, node->joint_limit_margin_rad(), node->joint_limit_gain_nm());
+        wrench_tau = gravity_model.computeEndEffectorWrenchTorques(
+          q_rad, node->latest_force_feedback_wrench());
+
+        std::fill(logged_currents.begin(), logged_currents.end(), std::numeric_limits<double>::quiet_NaN());
+        std::fill(logged_torques.begin(), logged_torques.end(), std::numeric_limits<double>::quiet_NaN());
 
         for (size_t i = 0; i < joint_models.size(); ++i) {
           const auto& model = joint_models[i];
           const int idx = model.actuator_idx;
+          total_tau[i] = gravity_tau[i] + limit_tau[i] + wrench_tau[i];
 
           // Keep position command at measured value to avoid following errors.
           base_command_leader.mutable_actuators(idx)->set_position(base_feedback_leader.actuators(idx).position());
 
           const double grav_current = kinova_teleoperation::torqueToCurrent(
-            gravity_tau[i], qdot_rad_s[i], model, MAX_ABS_CURRENT_A);
+            total_tau[i], qdot_rad_s[i], model, MAX_ABS_CURRENT_A);
           base_command_leader.mutable_actuators(idx)->set_current_motor(static_cast<float>(grav_current));
+          logged_currents[idx] = grav_current;
+          logged_torques[idx] = total_tau[i];
         }
 
         base_command_leader.set_frame_id(base_command_leader.frame_id() + 1);
@@ -265,18 +370,10 @@ bool lead(Robot& leader, KinovaTeleop& node)
         }
 
         if (refreshed) {
-          logger.log(base_feedback_leader);
-
-          std::vector<double> q_rad_refreshed(joint_models.size(), 0.0);
-          std::vector<double> qdot_rad_s_refreshed(joint_models.size(), 0.0);
-          for (size_t i = 0; i < joint_models.size(); ++i) {
-            const int idx = joint_models[i].actuator_idx;
-            q_rad_refreshed[i] = static_cast<double>(base_feedback_leader.actuators(idx).position()) * DEG2RAD;
-            qdot_rad_s_refreshed[i] = static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
-          }
+          logger.log(base_feedback_leader, logged_currents, logged_torques);
 
           const Eigen::Matrix<double, 6, 1> ee_twist =
-            gravity_model.computeEndEffectorTwist(q_rad_refreshed, qdot_rad_s_refreshed);
+            gravity_model.computeEndEffectorTwist(q_rad, qdot_rad_s);
 
           node.update_and_publish_twist(
             ee_twist(0),
@@ -348,7 +445,7 @@ bool read_buttons_blocking(Robot& robot)
 int main(int argc, char const* argv[])
 {
   rclcpp::init(argc, argv);
-  KinovaTeleop teleop_node{};
+  auto teleop_node = std::make_shared<KinovaTeleop>();
 
   Robot leader("192.168.2.11", "admin", "admin");
   move_to_start_position(leader.getBaseClient());

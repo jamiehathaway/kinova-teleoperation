@@ -98,30 +98,16 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
         std::vector<kinova_teleoperation::JointDriveModel> joint_models;
         try {
             const auto motor_model_path = kinova_teleoperation::resolveMotorModelPath();
-            joint_models = kinova_teleoperation::loadJointModels(motor_model_path);
+            joint_models = kinova_teleoperation::orderJointModelsByActuatorIndex(
+              kinova_teleoperation::loadJointModels(motor_model_path));
         } catch (const std::exception & ex) {
             std::cerr << "Unable to load motor model: " << ex.what() << std::endl;
             return false;
         }
 
-        if (joint_models.size() < static_cast<size_t>(actuator_count)) {
-            std::cerr << "Motor model has fewer entries than actuators." << std::endl;
+        if (joint_models.size() != static_cast<size_t>(actuator_count)) {
+            std::cerr << "Motor model size does not match actuator count." << std::endl;
             return false;
-        }
-
-        std::vector<kinova_teleoperation::JointDriveModel> model_by_idx(actuator_count);
-        std::vector<bool> has_model(actuator_count, false);
-        for (const auto & model : joint_models) {
-            if (model.actuator_idx >= 0 && model.actuator_idx < actuator_count) {
-                model_by_idx[model.actuator_idx] = model;
-                has_model[model.actuator_idx] = true;
-            }
-        }
-        for (int i = 0; i < actuator_count; ++i) {
-            if (!has_model[i]) {
-                std::cerr << "Motor model missing actuator_idx " << i << std::endl;
-                return false;
-            }
         }
 
         kinova_teleoperation::GravityModel gravity_model(
@@ -197,7 +183,7 @@ bool control_loop(k_api::Base::BaseClient* base, k_api::BaseCyclic::BaseCyclicCl
                     std::vector<double> model_currents(actuator_count, 0.0);
                     for (int i = 0; i < actuator_count; ++i) {
                         model_currents[i] = kinova_teleoperation::torqueToCurrent(
-                          gravity_tau[i], qdot_rad[i], model_by_idx[i]);
+                          gravity_tau[i], qdot_rad[i], joint_models[i]);
                     }
 
                     logger.log(base_feedback, model_currents, gravity_tau);
