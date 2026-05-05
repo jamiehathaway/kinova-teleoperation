@@ -77,6 +77,30 @@ Eigen::Quaternion<T> xyz_euler_to_quat(float tx, float ty, float tz)
   return Eigen::Quaternion<T>(qw, qx, qy, qz);
 }
 
+double wrapRadiansFromMinusPiToPi(double rad_not_wrapped, int & number_of_turns)
+{
+  bool properly_wrapped = false;
+  number_of_turns = 0;
+  do
+  {
+    if (rad_not_wrapped > M_PI)
+    {
+      number_of_turns += 1;
+      rad_not_wrapped -= 2.0 * M_PI;
+    }
+    else if (rad_not_wrapped < -M_PI)
+    {
+      number_of_turns -= 1;
+      rad_not_wrapped += 2.0 * M_PI;
+    }
+    else
+    {
+      properly_wrapped = true;
+    }
+  } while (!properly_wrapped);
+  return rad_not_wrapped;
+}
+
 class KinovaTeleop : public rclcpp::Node {
 public:
   KinovaTeleop()
@@ -89,9 +113,9 @@ public:
     force_feedback_timeout_sec_ = this->declare_parameter<double>(
       "force_feedback_timeout_sec", 0.2);
     joint_limit_margin_rad_ = this->declare_parameter<double>(
-      "joint_limit_repulsion_margin_rad", 0.25);
+      "joint_limit_repulsion_margin_rad", 0.5);
     joint_limit_gain_nm_ = this->declare_parameter<double>(
-      "joint_limit_repulsion_gain_nm", 2.0);
+      "joint_limit_repulsion_gain_nm", 1.0);
 
     m_delta_pose_pub = this->create_publisher<PoseMsg>(
       "/master/delta_pose", rclcpp::SensorDataQoS());
@@ -298,6 +322,7 @@ bool lead(Robot& leader, const std::shared_ptr<KinovaTeleop>& node)
 
     std::cout << "Running gravity compensation mode for " << DURATION << " seconds" << std::endl;
 
+    int wrap_pos_turns{0};
     std::vector<double> q_rad(joint_models.size(), 0.0);
     std::vector<double> qdot_rad_s(joint_models.size(), 0.0);
     std::vector<double> gravity_tau(joint_models.size(), 0.0);
@@ -316,7 +341,11 @@ bool lead(Robot& leader, const std::shared_ptr<KinovaTeleop>& node)
         std::fill(qdot_rad_s.begin(), qdot_rad_s.end(), 0.0);
         for (size_t i = 0; i < joint_models.size(); ++i) {
           const int idx = joint_models[i].actuator_idx;
-          q_rad[i] = static_cast<double>(base_feedback_leader.actuators(idx).position()) * DEG2RAD;
+          wrap_pos_turns = 0;
+          q_rad[i] = wrapRadiansFromMinusPiToPi(
+            static_cast<double>(base_feedback_leader.actuators(idx).position()) * DEG2RAD,
+            wrap_pos_turns
+          );
           qdot_rad_s[i] = static_cast<double>(base_feedback_leader.actuators(idx).velocity()) * DEG2RAD;
         }
 
@@ -333,6 +362,8 @@ bool lead(Robot& leader, const std::shared_ptr<KinovaTeleop>& node)
           const auto& model = joint_models[i];
           const int idx = model.actuator_idx;
           total_tau[i] = gravity_tau[i] + limit_tau[i] + wrench_tau[i];
+          
+          std::cout << limit_tau[i] << ", ";
 
           // Keep position command at measured value to avoid following errors.
           base_command_leader.mutable_actuators(idx)->set_position(base_feedback_leader.actuators(idx).position());
@@ -343,6 +374,7 @@ bool lead(Robot& leader, const std::shared_ptr<KinovaTeleop>& node)
           logged_currents[idx] = grav_current;
           logged_torques[idx] = total_tau[i];
         }
+        std::cout << '\n';
 
         base_command_leader.set_frame_id(base_command_leader.frame_id() + 1);
         if (base_command_leader.frame_id() > 65535) {
@@ -375,7 +407,7 @@ bool lead(Robot& leader, const std::shared_ptr<KinovaTeleop>& node)
           const Eigen::Matrix<double, 6, 1> ee_twist =
             gravity_model.computeEndEffectorTwist(q_rad, qdot_rad_s);
 
-          node.update_and_publish_twist(
+          node->update_and_publish_twist(
             ee_twist(0),
             ee_twist(1),
             ee_twist(2),

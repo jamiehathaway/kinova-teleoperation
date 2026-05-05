@@ -221,7 +221,7 @@ std::vector<double> GravityModel::computeJointLimitRepulsionTorques(
   if (joint_pos_rad.size() < impl_->joint_count) {
     throw std::runtime_error("Insufficient joint positions provided to joint-limit repulsion solver");
   }
-  if (margin_rad <= 0.0 || gain_nm <= 0.0) {
+  if (margin_rad == 0.0 || gain_nm == 0.0) {
     return std::vector<double>(impl_->joint_count, 0.0);
   }
 
