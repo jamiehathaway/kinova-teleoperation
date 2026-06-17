@@ -87,7 +87,7 @@ add_executable(kinova_motor_calibration
   src/arm_core_functions.cpp  
   src/actuator_csv_logger.cpp
   src/motor_model_utils.cpp
-  src/motor_calibration.cpp
+  src/motor_calibration_collect.cpp
 )
 target_include_directories(kinova_motor_calibration PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_motor_calibration PRIVATE _OS_UNIX)
