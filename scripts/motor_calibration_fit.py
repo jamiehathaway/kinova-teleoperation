@@ -25,6 +25,7 @@ from motor_model_utils import (
 
 DEG2RAD = 3.141592653589793 / 180.0
 JOINTS = [1, 2, 3, 4, 5, 6] # TODO: Get rid of this hack
+CURRENT_LIMIT = 12.0 #A
 DEFAULT_URDF = "src/ros2_kortex/kortex_description/robots/gen3_lite.urdf"
 DEFAULT_ROOT_LINK = "base_link"
 DEFAULT_TIP_LINK = "tool_frame"
@@ -306,6 +307,26 @@ def plot_pos_vs_vel(joints_data: Sequence[JointData], out_dir: str):
     plt.close(fig)
 
 
+def plot_torque_vs_current(motor_models: List[Tuple[str, List[JointModel]]], out_dir: str):
+    tau_path = os.path.join(out_dir, "torque_current_mapping.png")
+    fig, axs = plt.subplots(2, 3, figsize=(12, 6), constrained_layout=True)
+    axs = axs.flatten()
+    torques = np.linspace(-10, 10, num=100)
+    for name, motor_model in motor_models:
+        for ax, joint_model in zip(axs, motor_model):
+            predicted_currents = [
+                torque_to_current(tau, 0.0, joint_model, clamp=CURRENT_LIMIT)
+                for tau in torques
+            ]
+            ax.scatter(torques, predicted_currents, s=10, alpha=0.6, color="tab:blue", label=name)
+            ax.set_title(f"J{joint_model.actuator_idx}")
+            ax.set_xlabel("torque (Nm)")
+            ax.set_ylabel("current (A)")
+    fig.suptitle(f"Motor calibration: torque vs. current", fontsize=12)
+    fig.savefig(tau_path, dpi=150)
+    plt.close(fig)
+
+
 def output_fit_results(fitted_rows: List[Dict[str, float]], out_dir: str):
     fit_path = os.path.join(out_dir, "fit_results.csv")
     with open(fit_path, "w", newline="") as f:
@@ -480,6 +501,7 @@ def main() -> int:
         plot_joints(joints_data, args.out_dir, motor_models)
         plot_combined_joints(joints_data, args.out_dir, motor_models)
         plot_pos_vs_vel(joints_data, args.out_dir)
+        plot_torque_vs_current(motor_models, args.out_dir)
         print(f"Plots written to {args.out_dir}")
     return 0
 
