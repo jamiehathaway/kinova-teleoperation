@@ -12,7 +12,7 @@ from typing import Dict, List, Sequence, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-from gravity_model_backend import build_gravity_model, GravityModelBase
+from robot_model_backend import build_robot_model, RobotModelBase
 from motor_model_utils import (
     fit_drive_model,
     load_motor_model_csv,
@@ -63,7 +63,7 @@ def parse_args() -> argparse.Namespace:
         "--backend",
         choices=["auto", "kdl", "pinocchio"],
         default="pinocchio",
-        help="Gravity backend to use (default: pinocchio).",
+        help="Robot model backend to use (default: pinocchio).",
     )
     p.add_argument(
         "--plot",
@@ -145,7 +145,7 @@ class JointData():
     y_tau_logged: List[float]
 
 
-def compute_gravity(rows: List[Dict[str, float]], robot_model: GravityModelBase):
+def compute_gravity(rows: List[Dict[str, float]], robot_model: RobotModelBase):
     t = np.array([row["time_s"] for row in rows])
     q = np.array([[row[f"pos_{j}"] for j in JOINTS] for row in rows])
     v = np.array([[row[f"vel_{j}"] for j in JOINTS] for row in rows])
@@ -155,7 +155,7 @@ def compute_gravity(rows: List[Dict[str, float]], robot_model: GravityModelBase)
     return tau
 
 
-def load_joint_data(log_path: str, robot_model: GravityModelBase, joint_idx: int) -> JointData:
+def load_joint_data(log_path: str, robot_model: RobotModelBase, joint_idx: int) -> JointData:
     rows = load_log(log_path)
     tau = compute_gravity(rows, robot_model)
     j = joint_idx
@@ -403,17 +403,6 @@ def output_model(motor_model: List[JointModel], out_path: str):
                 ]
             )
 
-def build_robot_model(args: argparse.Namespace) -> GravityModelBase:
-    joint_names = [f"joint_{j}" for j in JOINTS]
-    try:
-        robot_model, backend = build_gravity_model(
-            args.urdf, args.root_link, args.tip_link, joint_names, backend=args.backend
-        )
-    except Exception as exc:
-        raise SystemExit(f"Failed to build robot model: {exc}") from exc
-    
-    return robot_model
-
 
 def build_motor_models(args: argparse.Namespace) -> List[Tuple[str, List[JointModel]]]:
     overlay_paths: List[str] = []
@@ -455,7 +444,13 @@ def main() -> int:
             f"Warning: motor model has {len(motor_model_base)} entries, expected {len(JOINTS)}."
         )
 
-    robot_model = build_robot_model(args)
+    try:
+        robot_model, backend = build_robot_model(
+            args.urdf, args.root_link, args.tip_link,
+            [f"joint_{j}" for j in JOINTS], backend=args.backend
+        )
+    except Exception as exc:
+        raise SystemExit(f"Failed to build robot model: {exc}") from exc
     motor_models = build_motor_models(args)
 
     joints_data: List[JointData] = []

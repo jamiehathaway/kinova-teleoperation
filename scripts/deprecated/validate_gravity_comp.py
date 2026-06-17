@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
-from gravity_model_backend import build_gravity_model
+from robot_model_backend import build_robot_model
 from motor_model_utils import fit_line_full, load_motor_model_csv, require_columns, resolve_motor_model_path
 
 
@@ -357,7 +357,7 @@ def main() -> int:
     if args.mode == "gravity":
         joint_names = [f"joint_{j}" for j in JOINTS]
         try:
-            model, backend = build_gravity_model(
+            model, backend = build_robot_model(
                 args.urdf, args.root_link, args.tip_link, joint_names, backend=args.backend
             )
             print(f"Using gravity backend: {backend}")

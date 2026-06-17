@@ -3,7 +3,7 @@
 from typing import List, Optional, Sequence, Tuple
 
 
-class GravityModelBase:
+class RobotModelBase:
     def compute(
         self,
         q_rad: Sequence[float],
@@ -13,7 +13,7 @@ class GravityModelBase:
         raise NotImplementedError
 
 
-class GravityModelKDL(GravityModelBase):
+class RobotModelKDL(RobotModelBase):
     def __init__(self, urdf_path: str, root_link: str, tip_link: str, joint_count: int):
         try:
             from urdf_parser_py.urdf import URDF  # type: ignore
@@ -55,7 +55,7 @@ class GravityModelKDL(GravityModelBase):
         return [float(self._g[i]) for i in range(self._joint_count)]
 
 
-class GravityModelPinocchio(GravityModelBase):
+class RobotModelPinocchio(RobotModelBase):
     def __init__(self, urdf_path: str, joint_names: Sequence[str]):
         try:
             import pinocchio as pin  # type: ignore
@@ -99,30 +99,30 @@ class GravityModelPinocchio(GravityModelBase):
         return out
 
 
-def build_gravity_model(
+def build_robot_model(
     urdf_path: str,
     root_link: str,
     tip_link: str,
     joint_names: Sequence[str],
     backend: str = "auto",
-) -> Tuple[GravityModelBase, str]:
+) -> Tuple[RobotModelBase, str]:
     joint_count = len(joint_names)
     backend = backend.lower().strip()
 
     if backend == "kdl":
-        model = GravityModelKDL(urdf_path, root_link, tip_link, joint_count)
+        model = RobotModelKDL(urdf_path, root_link, tip_link, joint_count)
         return model, "KDL"
     if backend == "pinocchio":
-        model = GravityModelPinocchio(urdf_path, joint_names)
+        model = RobotModelPinocchio(urdf_path, joint_names)
         return model, "Pinocchio"
     if backend != "auto":
         raise ValueError(f"Unknown backend: {backend}")
 
     try:
-        model = GravityModelKDL(urdf_path, root_link, tip_link, joint_count)
+        model = RobotModelKDL(urdf_path, root_link, tip_link, joint_count)
         return model, "KDL"
     except Exception as exc:
         kdl_err = str(exc)
 
-    model = GravityModelPinocchio(urdf_path, joint_names)
+    model = RobotModelPinocchio(urdf_path, joint_names)
     return model, f"Pinocchio (KDL unavailable: {kdl_err})"
