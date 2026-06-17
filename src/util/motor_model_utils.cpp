@@ -1,4 +1,4 @@
-#include "motor_model_utils.hpp"
+#include "util/motor_model_utils.hpp"
 
 #include <algorithm>
 #include <cmath>

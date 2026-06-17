@@ -5,9 +5,10 @@
 #include <string>
 #include <vector>
 #include <math.h>
-#include <api_setup.hpp>
 
 #include <google/protobuf/util/json_util.h>
+
+#include "util/api_setup.hpp"
 
 #if defined(_MSC_VER)
 #include <Windows.h>

@@ -38,10 +38,10 @@
 #endif
 #include <time.h>
 
-#include "api_setup.hpp"
-#include "arm_core_functions.hpp"
-#include "actuator_csv_logger.hpp"
-#include "motor_model_utils.hpp"
+#include "util/api_setup.hpp"
+#include "util/arm_core_functions.hpp"
+#include "util/actuator_csv_logger.hpp"
+#include "util/motor_model_utils.hpp"
 
 namespace k_api = Kinova::Api;
 

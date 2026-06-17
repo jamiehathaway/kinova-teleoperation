@@ -20,7 +20,7 @@
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <shape_msgs/msg/solid_primitive.hpp>
 
-#include "api_setup.hpp"
+#include "util/api_setup.hpp"
 
 namespace k_api = Kinova::Api;
 

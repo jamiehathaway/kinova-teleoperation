@@ -33,78 +33,78 @@ set(KORTEX_INCLUDE_DIRS
 
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/kortex_api/lib/release)
 
-add_executable(kinova_teleop
-  src/api_setup.cpp
-  src/arm_core_functions.cpp
-  src/leader.cpp
+add_executable(demo_leader_follower
+  src/util/api_setup.cpp
+  src/util/arm_core_functions.cpp
+  src/demo_leader_follower.cpp
 )
-target_include_directories(kinova_teleop PRIVATE ${KORTEX_INCLUDE_DIRS})
-target_compile_definitions(kinova_teleop PRIVATE _OS_UNIX DURATION=${DURATION})
-target_link_libraries(kinova_teleop
+target_include_directories(demo_leader_follower PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(demo_leader_follower PRIVATE _OS_UNIX DURATION=${DURATION})
+target_link_libraries(demo_leader_follower
   KortexApiCpp
   pthread
 )
 
-add_executable(kinova_torque_control_test
-  src/api_setup.cpp
-  src/arm_core_functions.cpp
-  src/actuator_csv_logger.cpp
-  src/motor_model_utils.cpp
-  src/torque_control_test.cpp
+add_executable(leader
+  src/util/api_setup.cpp
+  src/util/arm_core_functions.cpp
+  src/util/actuator_csv_logger.cpp
+  src/util/motor_model_utils.cpp
+  src/leader.cpp
 )
-target_include_directories(kinova_torque_control_test PRIVATE ${KORTEX_INCLUDE_DIRS})
-target_compile_definitions(kinova_torque_control_test PRIVATE _OS_UNIX DURATION=${DURATION})
-target_link_libraries(kinova_torque_control_test
+target_include_directories(leader PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(leader PRIVATE _OS_UNIX DURATION=${DURATION})
+target_link_libraries(leader
   KortexApiCpp
   pthread
   pinocchio::pinocchio
 )
-ament_target_dependencies(kinova_torque_control_test
+ament_target_dependencies(leader
   rclcpp
   geometry_msgs
   ament_index_cpp
 )
 
-add_executable(kinova_moveit_current_logger
-  src/api_setup.cpp
-  src/moveit_random_pose_current_logger.cpp
+add_executable(random_pose_collect
+  src/util/api_setup.cpp
+  src/random_pose_collect.cpp
 )
-target_include_directories(kinova_moveit_current_logger PRIVATE ${KORTEX_INCLUDE_DIRS})
-target_compile_definitions(kinova_moveit_current_logger PRIVATE _OS_UNIX)
-target_link_libraries(kinova_moveit_current_logger
+target_include_directories(random_pose_collect PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(random_pose_collect PRIVATE _OS_UNIX)
+target_link_libraries(random_pose_collect
   KortexApiCpp
   pthread
   moveit_ros_planning_interface::moveit_move_group_interface
 )
-ament_target_dependencies(kinova_moveit_current_logger
+ament_target_dependencies(random_pose_collect
   rclcpp
   sensor_msgs
   moveit_ros_planning_interface
 )
 
-add_executable(kinova_motor_calibration
-  src/api_setup.cpp
-  src/arm_core_functions.cpp  
-  src/actuator_csv_logger.cpp
-  src/motor_model_utils.cpp
+add_executable(motor_calibration_collect
+  src/util/api_setup.cpp
+  src/util/arm_core_functions.cpp  
+  src/util/actuator_csv_logger.cpp
+  src/util/motor_model_utils.cpp
   src/motor_calibration_collect.cpp
 )
-target_include_directories(kinova_motor_calibration PRIVATE ${KORTEX_INCLUDE_DIRS})
-target_compile_definitions(kinova_motor_calibration PRIVATE _OS_UNIX)
-target_link_libraries(kinova_motor_calibration
+target_include_directories(motor_calibration_collect PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(motor_calibration_collect PRIVATE _OS_UNIX)
+target_link_libraries(motor_calibration_collect
   KortexApiCpp
   pthread
   pinocchio::pinocchio
 )
-ament_target_dependencies(kinova_motor_calibration
+ament_target_dependencies(motor_calibration_collect
   ament_index_cpp
 )
 
 install(TARGETS
-  kinova_teleop
-  kinova_torque_control_test
-  kinova_moveit_current_logger
-  kinova_motor_calibration
+  demo_leader_follower
+  leader
+  random_pose_collect
+  motor_calibration_collect
   RUNTIME DESTINATION lib/${PROJECT_NAME})
 
 install(DIRECTORY launch

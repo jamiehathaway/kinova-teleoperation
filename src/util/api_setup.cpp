@@ -2,7 +2,7 @@
  * This class initializes the API of a robot with the specified IP address
  */
 
- #include "api_setup.hpp"
+ #include "util/api_setup.hpp"
  
  namespace k_api = Kinova::Api;
 
