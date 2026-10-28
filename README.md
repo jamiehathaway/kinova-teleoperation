@@ -2,6 +2,11 @@
 
 A C++ application that implements a leader-follower robot control system using the Kinova KINOVA KORTEX™ API. This system allows one robot to mimic the movements of another robot in real-time.
 
+> [!NOTE]
+> This repository is updated on a "when I feel like it" basis. I make no guarantee this code will work. Always check before running code on real hardware. Nonetheless, I hope this code is useful to those who wish to learn from it.
+> 
+> Contributions / issues are welcome but I reserve sole discretion for implementing any changes.
+
 ## Overview
 
 This project enables a follower robot to replicate the movements of a leader robot. Both robots start at their home position, and when the user presses the wrist buttons on the leader robot, they can freely move it for a specified duration while the follower robot mirrors these movements.
